@@ -237,6 +237,19 @@ class EmeraldHWS():
         mode_status = self.getFullStatus(id).get("last_state").get("mode")
         return mode_status
 
+    def getInfo(self, id):
+        """ Returns identifying details for the specified HWS
+        :param id: The UUID of the HWS to query
+        """
+        full_status = self.getFullStatus(id)
+
+        return {'id': id,
+                'serial_number': full_status.get("serial_number"),
+                'brand': full_status.get("brand"),
+                'hw_version': full_status.get("hw_version"),
+                'soft_version': full_status.get("soft_version")
+                }
+
     def listHWS(self):
         """ Returns a list of UUIDs of all discovered HWS
         """

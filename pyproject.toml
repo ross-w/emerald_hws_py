@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "emerald_hws"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
   "boto3",
-  "AWSIoTPythonSDK.MQTTLib"
+  "AWSIoTPythonSDK"
 ]
 authors = [
   { name="Ross Williamson", email="ross@inertia.net.nz" },
