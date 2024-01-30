@@ -52,6 +52,7 @@ class EmeraldHWS():
         post_response_json = post_response.json()
         if post_response_json.get("code") == 200:
             self.token = post_response_json.get("token")
+            return True
         else:
             raise Exception("Failed to log into Emerald API with supplied credentials")
 
