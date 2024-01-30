@@ -1,5 +1,6 @@
 import json
 import requests
+import os
 # import logging
 import boto3
 import random
@@ -77,6 +78,8 @@ class EmeraldHWS():
         """ Establishes a connection to Amazon IOT core's MQTT service
         """
 
+        cert_path = os.path.join(os.path.dirname(__file__), '__assets__', 'SFSRootCAG2.pem')
+
         # Cognito auth
         identityPoolID = self.COGNITO_IDENTITY_POOL_ID
         region = self.MQTT_HOST.split('.')[2]
@@ -95,7 +98,7 @@ class EmeraldHWS():
 
         # AWSIoTMQTTClient configuration
         myAWSIoTMQTTClient.configureEndpoint(self.MQTT_HOST, 443)
-        myAWSIoTMQTTClient.configureCredentials("./SFSRootCAG2.pem")
+        myAWSIoTMQTTClient.configureCredentials(cert_path)
         myAWSIoTMQTTClient.configureIAMCredentials(AccessKeyId, SecretKey, SessionToken)
         myAWSIoTMQTTClient.configureAutoReconnectBackoffTime(1, 32, 20)
         myAWSIoTMQTTClient.configureOfflinePublishQueueing(-1)  # Infinite offline Publish queueing
