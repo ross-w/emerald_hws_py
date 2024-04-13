@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "emerald_hws"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
   "boto3",
   "AWSIoTPythonSDK"

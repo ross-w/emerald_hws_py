@@ -1,7 +1,7 @@
 import json
 import requests
 import os
-# import logging
+import logging
 import boto3
 import random
 from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
@@ -30,6 +30,8 @@ class EmeraldHWS():
         self.password = password
         self.token = ""
         self.properties = {}
+        self.logger = logging.getLogger()
+        self.logger.setLevel(logging.DEBUG)
 
     def getLoginToken(self):
         """ Performs an API request to get a token from the API
@@ -71,31 +73,42 @@ class EmeraldHWS():
         post_response_json = post_response.json()
 
         if post_response_json.get("code") == 200:
+            self.logger.debug("Successfully logged into Emerald API")
             self.properties = post_response_json.get("info").get("property")
         else:
             raise Exception("Unable to fetch properties from Emerald API")
 
-    def connectMQTT(self):
-        """ Establishes a connection to Amazon IOT core's MQTT service
+    def getTemporaryCreds(self):
+        """ Returns temporary credentials for IoT Core
         """
 
-        cert_path = os.path.join(os.path.dirname(__file__), '__assets__', 'SFSRootCAG2.pem')
-
-        # Cognito auth
         identityPoolID = self.COGNITO_IDENTITY_POOL_ID
         region = self.MQTT_HOST.split('.')[2]
         cognitoIdentityClient = boto3.client('cognito-identity', region_name=region)
 
         temporaryIdentityId = cognitoIdentityClient.get_id(IdentityPoolId=identityPoolID)
         identityID = temporaryIdentityId["IdentityId"]
+        self.logger.debug("AWS IoT IdentityID: {}".format(identityID))
 
         temporaryCredentials = cognitoIdentityClient.get_credentials_for_identity(IdentityId=identityID)
-        AccessKeyId = temporaryCredentials["Credentials"]["AccessKeyId"]
-        SecretKey = temporaryCredentials["Credentials"]["SecretKey"]
-        SessionToken = temporaryCredentials["Credentials"]["SessionToken"]
+        self.logger.debug("Got new temporary credentials for AWS")
+        self.identityID = identityID
+        self.temporaryCredentials = temporaryCredentials
+
+
+    def connectMQTT(self):
+        """ Establishes a connection to Amazon IOT core's MQTT service
+        """
+
+        cert_path = os.path.join(os.path.dirname(__file__), '__assets__', 'SFSRootCAG2.pem')
+        self.getTemporaryCreds()
+
+        AccessKeyId = self.temporaryCredentials["Credentials"]["AccessKeyId"]
+        SecretKey = self.temporaryCredentials["Credentials"]["SecretKey"]
+        SessionToken = self.temporaryCredentials["Credentials"]["SessionToken"]
 
         # Init AWSIoTMQTTClient
-        myAWSIoTMQTTClient = AWSIoTMQTTClient(identityID, useWebsocket=True)
+        myAWSIoTMQTTClient = AWSIoTMQTTClient(self.identityID, useWebsocket=True)
 
         # AWSIoTMQTTClient configuration
         myAWSIoTMQTTClient.configureEndpoint(self.MQTT_HOST, 443)
@@ -106,7 +119,8 @@ class EmeraldHWS():
         myAWSIoTMQTTClient.configureDrainingFrequency(2)  # Draining: 2 Hz
         myAWSIoTMQTTClient.configureConnectDisconnectTimeout(10)  # 10 sec
         myAWSIoTMQTTClient.configureMQTTOperationTimeout(10)  # 10 sec
-
+        myAWSIoTMQTTClient.onOffline = self.on_offline
+        myAWSIoTMQTTClient.onOnline = self.on_online
         # Connect and subscribe to AWS IoT
         myAWSIoTMQTTClient.connect()
 
@@ -127,13 +141,27 @@ class EmeraldHWS():
                     self.updateHWSState(hws_id, key, json_payload[1][key])
 
     def mqttCallback(self, client, userdata, message):
-        # print("Received a new message: ")
-        # print(message.payload.decode("utf-8"))
-        # print("from topic: ")
-        # print(message.topic)
-        # print("--------------\n\n")
+        """ Calls decode update for received message
+        """
 
+        self.logger.debug("Received message from MQTT topic {}: {}".format(message.topic,message.payload.decode("utf-8")))
         self.mqttDecodeUpdate(message.topic, message.payload)
+
+    def on_offline(self):
+        """ Reconfigures temporary credentials
+        """
+
+        self.logger.debug("AWS IoT offline")
+        self.getTemporaryCreds()
+        AccessKeyId = self.temporaryCredentials["Credentials"]["AccessKeyId"]
+        SecretKey = self.temporaryCredentials["Credentials"]["SecretKey"]
+        SessionToken = self.temporaryCredentials["Credentials"]["SessionToken"]
+        self.myAWSIoTMQTTClient.configureIAMCredentials(AccessKeyId, SecretKey, SessionToken)
+
+    def on_online(self):
+        """ Logs online state
+        """
+        self.logger.debug("AWS IoT online")
 
     def updateHWSState(self, id, key, value):
         """ Updates the specified value for the supplied key in the HWS id specified
@@ -201,30 +229,35 @@ class EmeraldHWS():
         """ Turns the specified HWS on
         :param id: The UUID of the HWS to turn on
         """
+        self.logger.debug("Sending control message: turn on")
         self.sendControlMessage(id, {"switch":1})
 
     def turnOff(self, id):
         """ Turns the specified HWS off
         :param id: The UUID of the HWS to turn off
         """
+        self.logger.debug("Sending control message: turn off")
         self.sendControlMessage(id, {"switch":0})
 
     def setNormalMode(self, id):
         """ Sets the specified HWS to normal (not Boost or Quiet) mode
         :param id: The UUID of the HWS to set to normal mode
         """
+        self.logger.debug("Sending control message: normal mode")
         self.sendControlMessage(id, {"mode":1})
 
     def setBoostMode(self, id):
         """ Sets the specified HWS to boost (high power) mode
         :param id: The UUID of the HWS to set to boost mode
         """
+        self.logger.debug("Sending control message: boost mode")
         self.sendControlMessage(id, {"mode":0})
 
     def setQuietMode(self, id):
         """ Sets the specified HWS to quiet (low power) mode
         :param id: The UUID of the HWS to set to quiet mode
         """
+        self.logger.debug("Sending control message: quiet mode")
         self.sendControlMessage(id, {"mode":2})
 
     def isOn(self, id):
