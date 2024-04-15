@@ -31,7 +31,6 @@ class EmeraldHWS():
         self.token = ""
         self.properties = {}
         self.logger = logging.getLogger()
-        self.logger.setLevel(logging.DEBUG)
 
     def getLoginToken(self):
         """ Performs an API request to get a token from the API
@@ -122,7 +121,7 @@ class EmeraldHWS():
         myAWSIoTMQTTClient.onOffline = self.on_offline
         myAWSIoTMQTTClient.onOnline = self.on_online
         # Connect and subscribe to AWS IoT
-        myAWSIoTMQTTClient.connect()
+        myAWSIoTMQTTClient.connect(keepAliveIntervalSecond=60)
 
         self.myAWSIoTMQTTClient = myAWSIoTMQTTClient
 
