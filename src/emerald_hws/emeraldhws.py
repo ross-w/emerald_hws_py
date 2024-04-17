@@ -4,7 +4,8 @@ import os
 import logging
 import boto3
 import random
-from AWSIoTPythonSDK.MQTTLib import AWSIoTMQTTClient
+from awsiot import mqtt5_client_builder, mqtt_connection_builder
+from awscrt import mqtt5, http, auth, io
 
 
 class EmeraldHWS():
@@ -72,58 +73,46 @@ class EmeraldHWS():
         post_response_json = post_response.json()
 
         if post_response_json.get("code") == 200:
-            self.logger.debug("Successfully logged into Emerald API")
+            self.logger.debug("emeraldhws: Successfully logged into Emerald API")
             self.properties = post_response_json.get("info").get("property")
         else:
             raise Exception("Unable to fetch properties from Emerald API")
-
-    def getTemporaryCreds(self):
-        """ Returns temporary credentials for IoT Core
-        """
-
-        identityPoolID = self.COGNITO_IDENTITY_POOL_ID
-        region = self.MQTT_HOST.split('.')[2]
-        cognitoIdentityClient = boto3.client('cognito-identity', region_name=region)
-
-        temporaryIdentityId = cognitoIdentityClient.get_id(IdentityPoolId=identityPoolID)
-        identityID = temporaryIdentityId["IdentityId"]
-        self.logger.debug("AWS IoT IdentityID: {}".format(identityID))
-
-        temporaryCredentials = cognitoIdentityClient.get_credentials_for_identity(IdentityId=identityID)
-        self.logger.debug("Got new temporary credentials for AWS")
-        self.identityID = identityID
-        self.temporaryCredentials = temporaryCredentials
-
 
     def connectMQTT(self):
         """ Establishes a connection to Amazon IOT core's MQTT service
         """
 
         cert_path = os.path.join(os.path.dirname(__file__), '__assets__', 'SFSRootCAG2.pem')
-        self.getTemporaryCreds()
+        identityPoolID = self.COGNITO_IDENTITY_POOL_ID
+        region = self.MQTT_HOST.split('.')[2]
+        cognito_endpoint = "cognito-identity." + region + ".amazonaws.com"
+        cognitoIdentityClient = boto3.client('cognito-identity', region_name=region)
 
-        AccessKeyId = self.temporaryCredentials["Credentials"]["AccessKeyId"]
-        SecretKey = self.temporaryCredentials["Credentials"]["SecretKey"]
-        SessionToken = self.temporaryCredentials["Credentials"]["SessionToken"]
+        temporaryIdentityId = cognitoIdentityClient.get_id(IdentityPoolId=identityPoolID)
+        identityID = temporaryIdentityId["IdentityId"]
+        self.logger.debug("emeraldhws: awsiot: AWS IoT IdentityID: {}".format(identityID))
 
-        # Init AWSIoTMQTTClient
-        myAWSIoTMQTTClient = AWSIoTMQTTClient(self.identityID, useWebsocket=True)
+        credentials_provider = auth.AwsCredentialsProvider.new_cognito(
+                endpoint=cognito_endpoint,
+                identity=identityID,
+                tls_ctx=io.ClientTlsContext(io.TlsContextOptions()))
 
-        # AWSIoTMQTTClient configuration
-        myAWSIoTMQTTClient.configureEndpoint(self.MQTT_HOST, 443)
-        myAWSIoTMQTTClient.configureCredentials(cert_path)
-        myAWSIoTMQTTClient.configureIAMCredentials(AccessKeyId, SecretKey, SessionToken)
-        myAWSIoTMQTTClient.configureAutoReconnectBackoffTime(1, 32, 20)
-        myAWSIoTMQTTClient.configureOfflinePublishQueueing(-1)  # Infinite offline Publish queueing
-        myAWSIoTMQTTClient.configureDrainingFrequency(2)  # Draining: 2 Hz
-        myAWSIoTMQTTClient.configureConnectDisconnectTimeout(10)  # 10 sec
-        myAWSIoTMQTTClient.configureMQTTOperationTimeout(10)  # 10 sec
-        myAWSIoTMQTTClient.onOffline = self.on_offline
-        myAWSIoTMQTTClient.onOnline = self.on_online
-        # Connect and subscribe to AWS IoT
-        myAWSIoTMQTTClient.connect(keepAliveIntervalSecond=60)
+        client = mqtt5_client_builder.websockets_with_default_aws_signing(
+            endpoint = self.MQTT_HOST,
+            region = region,
+            credentials_provider = credentials_provider,
+            on_connection_interrupted = self.on_connection_interrupted,
+            on_connection_resumed = self.on_connection_resumed,
+            on_lifecycle_connection_success = self.on_lifecycle_connection_success,
+            on_lifecycle_stopped = self.on_lifecycle_stopped,
+            on_lifecycle_attempting_connect = self.on_lifecycle_attempting_connect,
+            on_lifecycle_disconnection = self.on_lifecycle_disconnection,
+            on_lifecycle_connection_failure = self.on_lifecycle_connection_failure,
+            on_publish_received = self.mqttCallback
+        )
 
-        self.myAWSIoTMQTTClient = myAWSIoTMQTTClient
+        client.start()
+        self.mqttClient = client
 
     def mqttDecodeUpdate(self, topic, payload):
         """ Attempt to decode a received MQTT message and direct appropriately
@@ -139,28 +128,53 @@ class EmeraldHWS():
                 for key in json_payload[1]:
                     self.updateHWSState(hws_id, key, json_payload[1][key])
 
-    def mqttCallback(self, client, userdata, message):
+    def mqttCallback(self, publish_packet_data):
         """ Calls decode update for received message
         """
+        publish_packet = publish_packet_data.publish_packet
+        assert isinstance(publish_packet, mqtt5.PublishPacket)
+        self.logger.debug("emeraldhws: awsiot: Received message from MQTT topic {}: {}".format(publish_packet.topic, publish_packet.payload))
+        self.mqttDecodeUpdate(publish_packet.topic, publish_packet.payload)
 
-        self.logger.debug("Received message from MQTT topic {}: {}".format(message.topic,message.payload.decode("utf-8")))
-        self.mqttDecodeUpdate(message.topic, message.payload)
-
-    def on_offline(self):
-        """ Reconfigures temporary credentials
+    def on_connection_interrupted(self, connection, error, **kwargs):
+        """ Log error when MQTT is interrupted
         """
+        self.logger.debug("emeraldhws: awsiot: Connection interrupted. error: {}".format(error))
 
-        self.logger.debug("AWS IoT offline")
-        self.getTemporaryCreds()
-        AccessKeyId = self.temporaryCredentials["Credentials"]["AccessKeyId"]
-        SecretKey = self.temporaryCredentials["Credentials"]["SecretKey"]
-        SessionToken = self.temporaryCredentials["Credentials"]["SessionToken"]
-        self.myAWSIoTMQTTClient.configureIAMCredentials(AccessKeyId, SecretKey, SessionToken)
-
-    def on_online(self):
-        """ Logs online state
+    def on_connection_resumed(self, connection, return_code, session_present, **kwargs):
+        """ Log message when MQTT is resumed
         """
-        self.logger.debug("AWS IoT online")
+        self.logger.debug("emeraldhws: awsiot: Connection resumed. return_code: {} session_present: {}".format(return_code, session_present))
+
+    def on_lifecycle_connection_success(self, lifecycle_connect_success_data: mqtt5.LifecycleConnectSuccessData):
+        """ Log message when connection succeeded
+        """
+        self.logger.debug("emeraldhws: awsiot: connection succeeded")
+        return
+
+    def on_lifecycle_connection_failure(self, lifecycle_connection_failure: mqtt5.LifecycleConnectFailureData):
+        """ Log message when connection failed
+        """
+        self.logger.debug("emeraldhws: awsiot: connection failed")
+        return
+
+    def on_lifecycle_stopped(self, lifecycle_stopped_data: mqtt5.LifecycleStoppedData):
+        """ Log message when stopped
+        """
+        self.logger.debug("emeraldhws: awsiot: stopped")
+        return
+
+    def on_lifecycle_disconnection(self, lifecycle_disconnect_data: mqtt5.LifecycleDisconnectData):
+        """ Log message when disconnected
+        """
+        self.logger.debug("emeraldhws: awsiot: disconnected")
+        return
+
+    def on_lifecycle_attempting_connect(self, lifecycle_attempting_connect_data: mqtt5.LifecycleAttemptingConnectData):
+        """ Log message when attempting connect
+        """
+        self.logger.debug("emeraldhws: awsiot: attempting to connect")
+        return
 
     def updateHWSState(self, id, key, value):
         """ Updates the specified value for the supplied key in the HWS id specified
@@ -179,12 +193,17 @@ class EmeraldHWS():
         """ Subscribes to the MQTT topics for the supplied HWS
         :param id: The UUID of the requested HWS
         """
-        if not self.myAWSIoTMQTTClient:
+        if not self.mqttClient:
             self.connectMQTT()
 
-        # self.myAWSIoTMQTTClient.subscribe("ep/heat_pump/to_gw/{}".format(id), 1, self.mqttCallback)
-        self.myAWSIoTMQTTClient.subscribe("ep/heat_pump/from_gw/{}".format(id), 1, self.mqttCallback)
-        # self.myAWSIoTMQTTClient.subscribe("ep/heat_pump/custom/topic/{}".format(id), 1, self.mqttCallback)
+        mqtt_topic = "ep/heat_pump/from_gw/{}".format(id)
+        subscribe_future = self.mqttClient.subscribe(
+                subscribe_packet=mqtt5.SubscribePacket(
+                        subscriptions=[mqtt5.Subscription(
+                        topic_filter=mqtt_topic,
+                        qos=mqtt5.QoS.AT_LEAST_ONCE)]))
+
+        suback = subscribe_future.result(20)
 
     def getFullStatus(self, id):
         """ Returns a dict with the full status of the specified HWS
@@ -221,42 +240,47 @@ class EmeraldHWS():
                },
                payload
               ]
-
-        self.myAWSIoTMQTTClient.publish("ep/heat_pump/to_gw/{}".format(id), json.dumps(msg), 1)
+        mqtt_topic = "ep/heat_pump/to_gw/{}".format(id)
+        publish_future = self.mqttClient.publish(
+                mqtt5.PublishPacket(
+                        topic=mqtt_topic,
+                        payload=json.dumps(msg),
+                        qos=mqtt5.QoS.AT_LEAST_ONCE))
+        publish_future.result(20) # 20 seconds
 
     def turnOn(self, id):
         """ Turns the specified HWS on
         :param id: The UUID of the HWS to turn on
         """
-        self.logger.debug("Sending control message: turn on")
+        self.logger.debug("emeraldhws: Sending control message: turn on")
         self.sendControlMessage(id, {"switch":1})
 
     def turnOff(self, id):
         """ Turns the specified HWS off
         :param id: The UUID of the HWS to turn off
         """
-        self.logger.debug("Sending control message: turn off")
+        self.logger.debug("emeraldhws: Sending control message: turn off")
         self.sendControlMessage(id, {"switch":0})
 
     def setNormalMode(self, id):
         """ Sets the specified HWS to normal (not Boost or Quiet) mode
         :param id: The UUID of the HWS to set to normal mode
         """
-        self.logger.debug("Sending control message: normal mode")
+        self.logger.debug("emeraldhws: Sending control message: normal mode")
         self.sendControlMessage(id, {"mode":1})
 
     def setBoostMode(self, id):
         """ Sets the specified HWS to boost (high power) mode
         :param id: The UUID of the HWS to set to boost mode
         """
-        self.logger.debug("Sending control message: boost mode")
+        self.logger.debug("emeraldhws: Sending control message: boost mode")
         self.sendControlMessage(id, {"mode":0})
 
     def setQuietMode(self, id):
         """ Sets the specified HWS to quiet (low power) mode
         :param id: The UUID of the HWS to set to quiet mode
         """
-        self.logger.debug("Sending control message: quiet mode")
+        self.logger.debug("emeraldhws: Sending control message: quiet mode")
         self.sendControlMessage(id, {"mode":2})
 
     def isOn(self, id):
