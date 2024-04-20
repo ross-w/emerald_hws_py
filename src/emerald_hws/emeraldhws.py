@@ -81,6 +81,12 @@ class EmeraldHWS():
         else:
             raise Exception("Unable to fetch properties from Emerald API")
 
+    def replaceCallback(self, update_callback):
+        """ Replaces the current registered update callback (if any) with the supplied
+        """
+
+        self.update_callback = update_callback
+
     def reconnectMQTT(self):
         """ Stops an existing MQTT connection and creates a new one
         """
