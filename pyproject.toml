@@ -4,14 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "emerald_hws"
-version = "0.0.7"
-dependencies = [
-  "boto3",
-  "awsiotsdk"
-]
-authors = [
-  { name="Ross Williamson", email="ross@inertia.net.nz" },
-]
+version = "0.0.8"
+dependencies = ["boto3", "awsiotsdk"]
+authors = [{ name = "Ross Williamson", email = "ross@inertia.net.nz" }]
 description = "A package to manipulate and monitor Emerald Heat Pump Hot Water Systems"
 readme = "README.md"
 requires-python = ">=3.7"

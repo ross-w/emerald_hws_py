@@ -4,6 +4,7 @@ import os
 import logging
 import boto3
 import random
+import threading
 from awsiot import mqtt5_client_builder, mqtt_connection_builder
 from awscrt import mqtt5, http, auth, io
 
@@ -21,10 +22,11 @@ class EmeraldHWS():
     MQTT_HOST = "a13v32g67itvz9-ats.iot.ap-southeast-2.amazonaws.com"
     COGNITO_IDENTITY_POOL_ID = "ap-southeast-2:f5bbb02c-c00e-4f10-acb3-e7d1b05268e8"
 
-    def __init__(self, email, password):
+    def __init__(self, email, password, update_callback=None):
         """ Initialise the API client
         :param email: The email address for logging into the Emerald app
         :param password: The password for the supplied user account
+        :param update_callback: Optional callback function to be called when an update is available
         """
 
         self.email = email
@@ -32,6 +34,7 @@ class EmeraldHWS():
         self.token = ""
         self.properties = {}
         self.logger = logging.getLogger()
+        self.update_callback = update_callback
 
     def getLoginToken(self):
         """ Performs an API request to get a token from the API
@@ -78,6 +81,15 @@ class EmeraldHWS():
         else:
             raise Exception("Unable to fetch properties from Emerald API")
 
+    def reconnectMQTT(self):
+        """ Stops an existing MQTT connection and creates a new one
+        """
+
+        self.logger.debug("emeraldhws: awsiot: Tearing down and reconnecting to prevent stale connection")
+        self.mqttClient.stop()
+        self.connectMQTT()
+        self.subscribeAllHWS()
+
     def connectMQTT(self):
         """ Establishes a connection to Amazon IOT core's MQTT service
         """
@@ -113,6 +125,7 @@ class EmeraldHWS():
 
         client.start()
         self.mqttClient = client
+        threading.Timer(43200.0, self.reconnectMQTT).start() # 12 hours
 
     def mqttDecodeUpdate(self, topic, payload):
         """ Attempt to decode a received MQTT message and direct appropriately
@@ -188,6 +201,8 @@ class EmeraldHWS():
             for heat_pump in heat_pumps:
                 if heat_pump['id'] == id:
                     heat_pump['last_state'][key] = value
+        if self.update_callback != None:
+            self.update_callback()
 
     def subscribeForUpdates(self, id):
         """ Subscribes to the MQTT topics for the supplied HWS
