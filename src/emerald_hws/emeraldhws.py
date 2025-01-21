@@ -311,6 +311,13 @@ class EmeraldHWS():
         switch_status = self.getFullStatus(id).get("last_state").get("switch")
         return (switch_status == 1 or switch_status == "on")
 
+    def isHeating(self, id):
+        """ Returns true if the specified HWS is currently heating
+        :param id: The UUID of the HWS to query
+        """
+        heating_status = self.getAllHWS().get("device_operation_status")
+        return (heating_status == 1)
+
     def currentMode(self, id):
         """ Returns an integer specifying the current mode (0==boost, 1==normal, 2==quiet)
         :param id: The UUID of the HWS to query
