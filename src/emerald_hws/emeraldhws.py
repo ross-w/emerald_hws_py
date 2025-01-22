@@ -315,7 +315,7 @@ class EmeraldHWS():
         """ Returns true if the specified HWS is currently heating
         :param id: The UUID of the HWS to query
         """
-        heating_status = self.getFullStatus(id).get("device_operation_status") 
+        heating_status = self.getFullStatus(id).get("device_operation_status")
         return (heating_status == 1)
 
     def currentMode(self, id):
