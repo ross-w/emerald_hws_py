@@ -37,7 +37,7 @@ class EmeraldHWS():
         self.password = password
         self.token = ""
         self.properties = {}
-        self.logger = logging.getLogger()
+        self.logger = logging.getLogger("emerald_hws")
         self.update_callback = update_callback
         
         # Convert minutes to seconds for internal use
