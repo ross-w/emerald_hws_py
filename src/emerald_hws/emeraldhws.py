@@ -45,6 +45,11 @@ class EmeraldHWS():
         self.last_message_time = None
         self.health_check_timer = None
         
+        # Connection state tracking
+        self.connection_state = "initial"  # possible states: initial, connected, failed
+        self.consecutive_failures = 0
+        self.max_backoff_seconds = 60  # Maximum backoff of 1 minute
+        
         # Ensure reasonable minimum values (e.g., at least 5 minutes for connection timeout)
         if connection_timeout_minutes < 5 and connection_timeout_minutes != 0:
             self.logger.warning("emeraldhws: Connection timeout too short, setting to minimum of 5 minutes")
@@ -214,7 +219,9 @@ class EmeraldHWS():
     def on_connection_interrupted(self, connection, error, **kwargs):
         """ Log error when MQTT is interrupted
         """
-        self.logger.debug("emeraldhws: awsiot: Connection interrupted. error: {}".format(error))
+        error_code = getattr(error, 'code', 'unknown')
+        error_name = getattr(error, 'name', 'unknown')
+        self.logger.info(f"emeraldhws: awsiot: Connection interrupted. Error: {error_name} (code: {error_code}), Message: {error}")
 
     def on_connection_resumed(self, connection, return_code, session_present, **kwargs):
         """ Log message when MQTT is resumed
@@ -225,12 +232,35 @@ class EmeraldHWS():
         """ Log message when connection succeeded
         """
         self.logger.debug("emeraldhws: awsiot: connection succeeded")
+        # Reset failure counter and update connection state
+        self.consecutive_failures = 0
+        self.connection_state = "connected"
         return
 
     def on_lifecycle_connection_failure(self, lifecycle_connection_failure: mqtt5.LifecycleConnectFailureData):
         """ Log message when connection failed
         """
-        self.logger.debug("emeraldhws: awsiot: connection failed")
+        error = lifecycle_connection_failure.error
+        error_code = getattr(error, 'code', 'unknown')
+        error_name = getattr(error, 'name', 'unknown')
+        error_message = str(error)
+        
+        # Update connection state and increment failure counter
+        self.connection_state = "failed"
+        self.consecutive_failures += 1
+        
+        # Log at INFO level since this is important for troubleshooting
+        self.logger.info(f"emeraldhws: awsiot: connection failed - Error: {error_name} (code: {error_code}), Message: {error_message}")
+        
+        # If there's a CONNACK packet available, log its details too
+        if hasattr(lifecycle_connection_failure, 'connack_packet') and lifecycle_connection_failure.connack_packet:
+            connack = lifecycle_connection_failure.connack_packet
+            reason_code = getattr(connack, 'reason_code', 'unknown')
+            reason_string = getattr(connack, 'reason_string', '')
+            if reason_string:
+                self.logger.info(f"emeraldhws: awsiot: MQTT CONNACK reason: {reason_code} - {reason_string}")
+            else:
+                self.logger.info(f"emeraldhws: awsiot: MQTT CONNACK reason code: {reason_code}")
         return
 
     def on_lifecycle_stopped(self, lifecycle_stopped_data: mqtt5.LifecycleStoppedData):
@@ -242,13 +272,22 @@ class EmeraldHWS():
     def on_lifecycle_disconnection(self, lifecycle_disconnect_data: mqtt5.LifecycleDisconnectData):
         """ Log message when disconnected
         """
-        self.logger.debug("emeraldhws: awsiot: disconnected")
+        # Extract disconnect reason if available
+        reason = "unknown reason"
+        if hasattr(lifecycle_disconnect_data, 'disconnect_packet') and lifecycle_disconnect_data.disconnect_packet:
+            reason_code = getattr(lifecycle_disconnect_data.disconnect_packet, 'reason_code', 'unknown')
+            reason_string = getattr(lifecycle_disconnect_data.disconnect_packet, 'reason_string', '')
+            reason = f"reason code: {reason_code}" + (f" - {reason_string}" if reason_string else "")
+        
+        self.logger.info(f"emeraldhws: awsiot: disconnected - {reason}")
         return
 
     def on_lifecycle_attempting_connect(self, lifecycle_attempting_connect_data: mqtt5.LifecycleAttemptingConnectData):
         """ Log message when attempting connect
         """
-        self.logger.debug("emeraldhws: awsiot: attempting to connect")
+        # Include endpoint information if available
+        endpoint = getattr(lifecycle_attempting_connect_data, 'endpoint', 'unknown')
+        self.logger.debug(f"emeraldhws: awsiot: attempting to connect to {endpoint}")
         return
         
     def check_connection_health(self):
@@ -265,6 +304,14 @@ class EmeraldHWS():
             if time_since_last_message > self.health_check_interval:
                 # This is an INFO level log because it's an important event
                 self.logger.info(f"emeraldhws: awsiot: No messages received for {minutes_since_last:.1f} minutes, reconnecting")
+                
+                # If we're in a failed state, apply exponential backoff
+                if self.connection_state == "failed" and self.consecutive_failures > 0:
+                    # Calculate backoff time with exponential increase, capped at max_backoff_seconds
+                    backoff_seconds = min(2 ** (self.consecutive_failures - 1), self.max_backoff_seconds)
+                    self.logger.info(f"emeraldhws: awsiot: Connection in failed state, applying backoff of {backoff_seconds} seconds before retry (attempt {self.consecutive_failures})")
+                    time.sleep(backoff_seconds)
+                
                 self.reconnectMQTT(reason="health_check")
             else:
                 # This is a DEBUG level log to avoid cluttering logs
