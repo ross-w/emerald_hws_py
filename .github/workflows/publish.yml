@@ -156,8 +156,11 @@ jobs:
     if: needs.security-check.outputs.is-authorized == 'true'
     runs-on: ubuntu-latest
 
-    # CRITICAL SECURITY: Environment will be created during setup process
-    # This provides additional protection beyond OIDC trusted publishing
+    # CRITICAL SECURITY: This environment provides additional protection
+    # beyond OIDC trusted publishing. Forks cannot access this environment.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/emerald-hws
 
     # CRITICAL SECURITY: These permissions enable OIDC trusted publishing
     # The id-token is cryptographically tied to this specific repository
