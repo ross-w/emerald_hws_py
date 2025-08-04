@@ -5,3 +5,4 @@
 # This file is kept for compatibility but pyproject.toml is the source of truth
 boto3>=1.40.0,<2.0.0
 awsiotsdk>=1.24.0,<2.0.0
+requests>=2.25.0

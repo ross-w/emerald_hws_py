@@ -7,7 +7,8 @@ name = "emerald_hws"
 version = "0.0.11"
 dependencies = [
     "boto3>=1.40.0,<2.0.0",
-    "awsiotsdk>=1.24.0,<2.0.0"
+    "awsiotsdk>=1.24.0,<2.0.0",
+    "requests>=2.25.0"
 ]
 authors = [{ name = "Ross Williamson", email = "ross@inertia.net.nz" }]
 description = "A package to manipulate and monitor Emerald Heat Pump Hot Water Systems"
