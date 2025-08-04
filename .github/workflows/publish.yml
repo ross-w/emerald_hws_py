@@ -43,15 +43,24 @@ jobs:
             echo "   would reject the upload due to OIDC repository mismatch."
           fi
 
-  # Comprehensive testing
-  test:
-    name: "Test Suite"
+  lint:
+    name: "Lint Check"
+    needs: security-check
+    if: needs.security-check.outputs.is-authorized == 'true'
+    uses: ./.github/workflows/lint.yml
+
+  smoke-test:
+    name: "Smoke Test"
+    needs: security-check
+    if: needs.security-check.outputs.is-authorized == 'true'
+    uses: ./.github/workflows/smoke-test.yml
+
+  # Additional publish-specific validation
+  version-check:
+    name: "Version Validation"
     needs: security-check
     if: needs.security-check.outputs.is-authorized == 'true'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - name: "Checkout repository"
@@ -60,24 +69,18 @@ jobs:
           # Fetch full history for setuptools-scm version detection
           fetch-depth: 0
 
-      - name: "Set up Python ${{ matrix.python-version }}"
+      - name: "Set up Python"
         uses: "actions/setup-python@v5"
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
           cache: "pip"
 
-      - name: "Install package with dev dependencies"
+      - name: "Install package"
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e .
 
-      - name: "Run linting"
-        run: python -m ruff check .
-
-      - name: "Test package import"
-        run: python -c "import emerald_hws; print('✅ emerald_hws imported successfully')"
-
-      - name: "Verify dynamic versioning"
+      - name: "Verify dynamic versioning for release"
         run: |
           python -c "
           import emerald_hws
@@ -85,18 +88,22 @@ jobs:
           pkg_version = version('emerald_hws')
           print(f'📦 Detected version: {pkg_version}')
 
-          # Ensure version was properly detected from git tags
-          if pkg_version == '0.0.0' or 'dev' in pkg_version:
-              print('⚠️  Warning: Development version detected')
-              print('   This is normal for non-release builds')
+          # For releases, ensure we have a proper version
+          if '${{ github.event_name }}' == 'release':
+              if 'dev' in pkg_version or '+' in pkg_version:
+                  print('❌ Development version detected for release')
+                  print('   This suggests the release tag may not be properly formatted')
+                  exit(1)
+              else:
+                  print('✅ Release version detected')
           else:
-              print('✅ Release version detected')
+              print('ℹ️  Manual trigger - version validation skipped')
           "
 
   # Build package
   build:
     name: "Build Package"
-    needs: [security-check, test]
+    needs: [security-check, lint, smoke-test, version-check]
     if: needs.security-check.outputs.is-authorized == 'true'
     runs-on: ubuntu-latest
 
@@ -152,7 +159,7 @@ jobs:
   # Publish using PyPI Trusted Publishing (OIDC)
   publish:
     name: "Publish to PyPI"
-    needs: [security-check, test, build]
+    needs: [security-check, lint, smoke-test, version-check, build]
     if: needs.security-check.outputs.is-authorized == 'true'
     runs-on: ubuntu-latest
 
