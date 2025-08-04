@@ -5,6 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "emerald_hws"
 dynamic = ["version"]
+license = "MIT"
 dependencies = [
     "boto3>=1.40.0,<2.0.0",
     "awsiotsdk>=1.24.0,<2.0.0",
@@ -16,7 +17,6 @@ readme = "README.md"
 requires-python = ">=3.7"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 
@@ -35,7 +35,7 @@ where = ["src"]
 "*" = ["*.*"]
 
 [tool.setuptools_scm]
-version_scheme = "release-branch-semver"
+# Use default version scheme for better compatibility
 
 [project.urls]
 "Homepage" = "https://github.com/ross-w/emerald_hws_py"
