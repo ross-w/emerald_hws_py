@@ -5,6 +5,7 @@ import logging
 import boto3
 import random
 import threading
+import time
 from awsiot import mqtt5_client_builder, mqtt_connection_builder
 from awscrt import mqtt5, http, auth, io
 
@@ -22,11 +23,13 @@ class EmeraldHWS():
     MQTT_HOST = "a13v32g67itvz9-ats.iot.ap-southeast-2.amazonaws.com"
     COGNITO_IDENTITY_POOL_ID = "ap-southeast-2:f5bbb02c-c00e-4f10-acb3-e7d1b05268e8"
 
-    def __init__(self, email, password, update_callback=None):
+    def __init__(self, email, password, update_callback=None, connection_timeout_minutes=720, health_check_minutes=60):
         """ Initialise the API client
         :param email: The email address for logging into the Emerald app
         :param password: The password for the supplied user account
         :param update_callback: Optional callback function to be called when an update is available
+        :param connection_timeout_minutes: Optional timeout in minutes before reconnecting MQTT (default: 720 minutes/12 hours)
+        :param health_check_minutes: Optional interval in minutes to check for message activity (default: 60 minutes/1 hour)
         """
 
         self.email = email
@@ -35,6 +38,22 @@ class EmeraldHWS():
         self.properties = {}
         self.logger = logging.getLogger()
         self.update_callback = update_callback
+        
+        # Convert minutes to seconds for internal use
+        self.connection_timeout = connection_timeout_minutes * 60.0
+        self.health_check_interval = health_check_minutes * 60.0 if health_check_minutes > 0 else 0
+        self.last_message_time = None
+        self.health_check_timer = None
+        
+        # Ensure reasonable minimum values (e.g., at least 5 minutes for connection timeout)
+        if connection_timeout_minutes < 5 and connection_timeout_minutes != 0:
+            self.logger.warning("emeraldhws: Connection timeout too short, setting to minimum of 5 minutes")
+            self.connection_timeout = 5 * 60.0
+        
+        # Ensure reasonable minimum values for health check (e.g., at least 5 minutes)
+        if 0 < health_check_minutes < 5:
+            self.logger.warning("emeraldhws: Health check interval too short, setting to minimum of 5 minutes")
+            self.health_check_interval = 5 * 60.0
 
     def getLoginToken(self):
         """ Performs an API request to get a token from the API
@@ -87,14 +106,41 @@ class EmeraldHWS():
 
         self.update_callback = update_callback
 
-    def reconnectMQTT(self):
+    def reconnectMQTT(self, reason="scheduled"):
         """ Stops an existing MQTT connection and creates a new one
+        :param reason: Reason for reconnection (scheduled, health_check, etc.)
         """
-
-        self.logger.debug("emeraldhws: awsiot: Tearing down and reconnecting to prevent stale connection")
+        self.logger.info(f"emeraldhws: awsiot: Reconnecting MQTT connection (reason: {reason})")
+        
+        # Store current temperature values for comparison after reconnect
+        temp_values = {}
+        for properties in self.properties:
+            heat_pumps = properties.get('heat_pump', [])
+            for heat_pump in heat_pumps:
+                hws_id = heat_pump['id']
+                if 'last_state' in heat_pump and 'temp_current' in heat_pump['last_state']:
+                    temp_values[hws_id] = heat_pump['last_state']['temp_current']
+        
         self.mqttClient.stop()
         self.connectMQTT()
         self.subscribeAllHWS()
+        
+        # After reconnection, check if temperatures have changed
+        def check_temp_changes():
+            for properties in self.properties:
+                heat_pumps = properties.get('heat_pump', [])
+                for heat_pump in heat_pumps:
+                    hws_id = heat_pump['id']
+                    if (hws_id in temp_values and 
+                        'last_state' in heat_pump and 
+                        'temp_current' in heat_pump['last_state']):
+                        old_temp = temp_values[hws_id]
+                        new_temp = heat_pump['last_state']['temp_current']
+                        if old_temp != new_temp:
+                            self.logger.info(f"emeraldhws: Temperature changed after reconnect for {hws_id}: {old_temp} → {new_temp}")
+        
+        # Check for temperature changes after a short delay to allow for updates
+        threading.Timer(10.0, check_temp_changes).start()
 
     def connectMQTT(self):
         """ Establishes a connection to Amazon IOT core's MQTT service
@@ -131,7 +177,16 @@ class EmeraldHWS():
 
         client.start()
         self.mqttClient = client
-        threading.Timer(43200.0, self.reconnectMQTT).start() # 12 hours
+        
+        # Schedule periodic reconnection using configurable timeout
+        if self.connection_timeout > 0:
+            threading.Timer(self.connection_timeout, self.reconnectMQTT).start()
+        
+        # Start health check timer if enabled
+        if self.health_check_interval > 0:
+            self.health_check_timer = threading.Timer(self.health_check_interval, self.check_connection_health)
+            self.health_check_timer.daemon = True
+            self.health_check_timer.start()
 
     def mqttDecodeUpdate(self, topic, payload):
         """ Attempt to decode a received MQTT message and direct appropriately
@@ -153,6 +208,7 @@ class EmeraldHWS():
         publish_packet = publish_packet_data.publish_packet
         assert isinstance(publish_packet, mqtt5.PublishPacket)
         self.logger.debug("emeraldhws: awsiot: Received message from MQTT topic {}: {}".format(publish_packet.topic, publish_packet.payload))
+        self.last_message_time = time.time()  # Update the last message time
         self.mqttDecodeUpdate(publish_packet.topic, publish_packet.payload)
 
     def on_connection_interrupted(self, connection, error, **kwargs):
@@ -194,6 +250,31 @@ class EmeraldHWS():
         """
         self.logger.debug("emeraldhws: awsiot: attempting to connect")
         return
+        
+    def check_connection_health(self):
+        """ Check if we've received any messages recently, reconnect if not
+        """
+        if self.last_message_time is None:
+            # No messages received yet, don't reconnect
+            self.logger.debug("emeraldhws: awsiot: Health check - No messages received yet")
+        else:
+            current_time = time.time()
+            time_since_last_message = current_time - self.last_message_time
+            minutes_since_last = time_since_last_message / 60.0
+            
+            if time_since_last_message > self.health_check_interval:
+                # This is an INFO level log because it's an important event
+                self.logger.info(f"emeraldhws: awsiot: No messages received for {minutes_since_last:.1f} minutes, reconnecting")
+                self.reconnectMQTT(reason="health_check")
+            else:
+                # This is a DEBUG level log to avoid cluttering logs
+                self.logger.debug(f"emeraldhws: awsiot: Health check - Last message received {minutes_since_last:.1f} minutes ago")
+        
+        # Schedule next health check
+        if self.health_check_interval > 0:
+            self.health_check_timer = threading.Timer(self.health_check_interval, self.check_connection_health)
+            self.health_check_timer.daemon = True
+            self.health_check_timer.start()
 
     def updateHWSState(self, id, key, value):
         """ Updates the specified value for the supplied key in the HWS id specified
