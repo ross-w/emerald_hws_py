@@ -1,3 +1,3 @@
-from emerald_hws.emeraldhws import EmeraldHWS
+from .emeraldhws import EmeraldHWS
 
 __all__ = ["EmeraldHWS"]
