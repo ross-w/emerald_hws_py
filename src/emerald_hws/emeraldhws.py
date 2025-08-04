@@ -1,13 +1,14 @@
 import json
-import requests
-import os
 import logging
-import boto3
+import os
 import random
 import threading
 import time
-from awsiot import mqtt5_client_builder, mqtt_connection_builder
-from awscrt import mqtt5, http, auth, io
+
+import boto3
+import requests
+from awscrt import mqtt5, auth, io
+from awsiot import mqtt5_client_builder
 
 
 class EmeraldHWS():
@@ -151,7 +152,8 @@ class EmeraldHWS():
         """ Establishes a connection to Amazon IOT core's MQTT service
         """
 
-        cert_path = os.path.join(os.path.dirname(__file__), '__assets__', 'SFSRootCAG2.pem')
+        # Certificate path is available but not currently used in the connection
+        # os.path.join(os.path.dirname(__file__), '__assets__', 'SFSRootCAG2.pem')
         identityPoolID = self.COGNITO_IDENTITY_POOL_ID
         region = self.MQTT_HOST.split('.')[2]
         cognito_endpoint = "cognito-identity." + region + ".amazonaws.com"
@@ -335,7 +337,7 @@ class EmeraldHWS():
             for heat_pump in heat_pumps:
                 if heat_pump['id'] == id:
                     heat_pump['last_state'][key] = value
-        if self.update_callback != None:
+        if self.update_callback is not None:
             self.update_callback()
 
     def subscribeForUpdates(self, id):
@@ -352,7 +354,8 @@ class EmeraldHWS():
                         topic_filter=mqtt_topic,
                         qos=mqtt5.QoS.AT_LEAST_ONCE)]))
 
-        suback = subscribe_future.result(20)
+        # Wait for subscription to complete
+        subscribe_future.result(20)
 
     def getFullStatus(self, id):
         """ Returns a dict with the full status of the specified HWS
