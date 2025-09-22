@@ -39,6 +39,7 @@ class EmeraldHWS():
         self.properties = {}
         self.logger = logging.getLogger(__name__)
         self.update_callback = update_callback
+        self._state_lock = threading.RLock()  # Thread-safe lock for state operations
         
         # Convert minutes to seconds for internal use
         self.connection_timeout = connection_timeout_minutes * 60.0
@@ -332,11 +333,14 @@ class EmeraldHWS():
         :param value: value to set
         """
 
-        for properties in self.properties:
-            heat_pumps = properties.get('heat_pump', [])
-            for heat_pump in heat_pumps:
-                if heat_pump['id'] == id:
-                    heat_pump['last_state'][key] = value
+        with self._state_lock:
+            for properties in self.properties:
+                heat_pumps = properties.get('heat_pump', [])
+                for heat_pump in heat_pumps:
+                    if heat_pump['id'] == id:
+                        heat_pump['last_state'][key] = value
+        
+        # Call callback AFTER releasing lock to avoid potential deadlocks
         if self.update_callback is not None:
             self.update_callback()
 
@@ -365,11 +369,13 @@ class EmeraldHWS():
         if not self.properties:
             self.connect()
 
-        for properties in self.properties:
-            heat_pumps = properties.get('heat_pump', [])
-            for heat_pump in heat_pumps:
-                if heat_pump['id'] == id:
-                    return heat_pump
+        with self._state_lock:
+            for properties in self.properties:
+                heat_pumps = properties.get('heat_pump', [])
+                for heat_pump in heat_pumps:
+                    if heat_pump['id'] == id:
+                        return heat_pump
+        return None
 
     def sendControlMessage(self, id, payload):
         """ Sends a message via MQTT to the HWS
@@ -381,6 +387,8 @@ class EmeraldHWS():
             self.connect()
 
         hwsdetail = self.getFullStatus(id)
+        if not hwsdetail:
+            raise Exception(f"Unable to find HWS with ID {id}")
 
         msg = [{"device_id":id,
                 "namespace":"business",
@@ -439,35 +447,45 @@ class EmeraldHWS():
         """ Returns true if the specified HWS is currently on
         :param id: The UUID of the HWS to query
         """
-        switch_status = self.getFullStatus(id).get("last_state").get("switch")
-        return (switch_status == 1 or switch_status == "on")
+        full_status = self.getFullStatus(id)
+        if full_status and full_status.get("last_state"):
+            switch_status = full_status.get("last_state").get("switch")
+            return (switch_status == 1 or switch_status == "on")
+        return False
 
     def isHeating(self, id):
         """ Returns true if the specified HWS is currently heating
         :param id: The UUID of the HWS to query
         """
-        heating_status = self.getFullStatus(id).get("device_operation_status")
-        return (heating_status == 1)
+        full_status = self.getFullStatus(id)
+        if full_status:
+            heating_status = full_status.get("device_operation_status")
+            return (heating_status == 1)
+        return False
 
     def currentMode(self, id):
         """ Returns an integer specifying the current mode (0==boost, 1==normal, 2==quiet)
         :param id: The UUID of the HWS to query
         """
-        mode_status = self.getFullStatus(id).get("last_state").get("mode")
-        return mode_status
+        full_status = self.getFullStatus(id)
+        if full_status and full_status.get("last_state"):
+            mode_status = full_status.get("last_state").get("mode")
+            return mode_status
+        return None
 
     def getInfo(self, id):
         """ Returns identifying details for the specified HWS
         :param id: The UUID of the HWS to query
         """
         full_status = self.getFullStatus(id)
-
-        return {'id': id,
-                'serial_number': full_status.get("serial_number"),
-                'brand': full_status.get("brand"),
-                'hw_version': full_status.get("hw_version"),
-                'soft_version': full_status.get("soft_version")
-                }
+        if full_status:
+            return {'id': id,
+                    'serial_number': full_status.get("serial_number"),
+                    'brand': full_status.get("brand"),
+                    'hw_version': full_status.get("hw_version"),
+                    'soft_version': full_status.get("soft_version")
+                    }
+        return None
 
     def listHWS(self):
         """ Returns a list of UUIDs of all discovered HWS
