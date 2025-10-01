@@ -459,8 +459,17 @@ class EmeraldHWS():
         """
         full_status = self.getFullStatus(id)
         if full_status:
+            # Try to get work_state from last_state (updated via MQTT)
+            if full_status.get("last_state") and "work_state" in full_status.get("last_state"):
+                work_state = full_status.get("last_state").get("work_state")
+                # work_state: 0=off/idle, 1=actively heating, 2=on but not heating
+                return (work_state == 1)
+            
+            # Fallback to device_operation_status if work_state not available yet
+            # (e.g., before first MQTT update after initialization)
             heating_status = full_status.get("device_operation_status")
             return (heating_status == 1)
+        
         return False
 
     def currentMode(self, id):
