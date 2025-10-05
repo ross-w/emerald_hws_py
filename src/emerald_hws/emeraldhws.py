@@ -472,6 +472,27 @@ class EmeraldHWS():
         
         return False
 
+    def getHourlyEnergyUsage(self, id):
+        """ Returns energy usage as reported by heater for the previous hour in kWh and a string of format YYYY-MM-DD HH:00 dictating the starting hour for the energy reading
+        :param id: The UUID of the HWS to query
+        """
+        full_status = self.getFullStatus(id)
+        if not full_status:
+            return None
+
+        consumption = full_status.get("consumption_data")
+        if consumption:
+            consumption = json.loads(consumption)
+        else:
+            return None
+
+        current_hour = consumption.get("current_hour")
+        last_data_at = consumption.get("last_data_at")
+        if current_hour is None or last_data_at is None:
+            return None
+
+        return current_hour, last_data_at
+
     def currentMode(self, id):
         """ Returns an integer specifying the current mode (0==boost, 1==normal, 2==quiet)
         :param id: The UUID of the HWS to query
