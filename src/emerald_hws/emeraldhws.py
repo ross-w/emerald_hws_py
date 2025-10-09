@@ -40,13 +40,15 @@ class EmeraldHWS():
         self.logger = logging.getLogger(__name__)
         self.update_callback = update_callback
         self._state_lock = threading.RLock()  # Thread-safe lock for state operations
-        
+        self._connection_event = threading.Event()  # Event to signal when MQTT connection is established
+        self.mqttClient = None  # Initialize to None
+
         # Convert minutes to seconds for internal use
         self.connection_timeout = connection_timeout_minutes * 60.0
         self.health_check_interval = health_check_minutes * 60.0 if health_check_minutes > 0 else 0
         self.last_message_time = None
         self.health_check_timer = None
-        
+
         # Connection state tracking
         self.connection_state = "initial"  # possible states: initial, connected, failed
         self.consecutive_failures = 0
@@ -118,7 +120,7 @@ class EmeraldHWS():
         :param reason: Reason for reconnection (scheduled, health_check, etc.)
         """
         self.logger.info(f"emeraldhws: awsiot: Reconnecting MQTT connection (reason: {reason})")
-        
+
         # Store current temperature values for comparison after reconnect
         temp_values = {}
         for properties in self.properties:
@@ -127,8 +129,11 @@ class EmeraldHWS():
                 hws_id = heat_pump['id']
                 if 'last_state' in heat_pump and 'temp_current' in heat_pump['last_state']:
                     temp_values[hws_id] = heat_pump['last_state']['temp_current']
-        
-        self.mqttClient.stop()
+
+        if self.mqttClient is not None:
+            self.mqttClient.stop()
+            self.mqttClient = None  # Clear the client so a new one can be created
+
         self.connectMQTT()
         self.subscribeAllHWS()
         
@@ -152,6 +157,14 @@ class EmeraldHWS():
     def connectMQTT(self):
         """ Establishes a connection to Amazon IOT core's MQTT service
         """
+
+        # If already connected, skip
+        if self.mqttClient is not None:
+            self.logger.debug("emeraldhws: awsiot: MQTT client already exists, skipping connection")
+            return
+
+        # Clear the connection event before starting new connection
+        self._connection_event.clear()
 
         # Certificate path is available but not currently used in the connection
         # os.path.join(os.path.dirname(__file__), '__assets__', 'SFSRootCAG2.pem')
@@ -185,11 +198,16 @@ class EmeraldHWS():
 
         client.start()
         self.mqttClient = client
-        
+
+        # Block until connection is established or timeout (30 seconds)
+        if not self._connection_event.wait(timeout=30):
+            self.logger.warning("emeraldhws: awsiot: Connection establishment timed out after 30 seconds")
+            # Continue anyway - the connection may still succeed asynchronously
+
         # Schedule periodic reconnection using configurable timeout
         if self.connection_timeout > 0:
             threading.Timer(self.connection_timeout, self.reconnectMQTT).start()
-        
+
         # Start health check timer if enabled
         if self.health_check_interval > 0:
             self.health_check_timer = threading.Timer(self.health_check_interval, self.check_connection_health)
@@ -238,6 +256,8 @@ class EmeraldHWS():
         # Reset failure counter and update connection state
         self.consecutive_failures = 0
         self.connection_state = "connected"
+        # Signal that connection is established
+        self._connection_event.set()
         return
 
     def on_lifecycle_connection_failure(self, lifecycle_connection_failure: mqtt5.LifecycleConnectFailureData):
@@ -247,14 +267,18 @@ class EmeraldHWS():
         error_code = getattr(error, 'code', 'unknown')
         error_name = getattr(error, 'name', 'unknown')
         error_message = str(error)
-        
+
         # Update connection state and increment failure counter
         self.connection_state = "failed"
         self.consecutive_failures += 1
-        
+
         # Log at INFO level since this is important for troubleshooting
         self.logger.info(f"emeraldhws: awsiot: connection failed - Error: {error_name} (code: {error_code}), Message: {error_message}")
-        
+
+        # Log additional error details if available
+        if hasattr(error, '__dict__'):
+            self.logger.debug(f"emeraldhws: awsiot: error details: {error.__dict__}")
+
         # If there's a CONNACK packet available, log its details too
         if hasattr(lifecycle_connection_failure, 'connack_packet') and lifecycle_connection_failure.connack_packet:
             connack = lifecycle_connection_failure.connack_packet
@@ -264,6 +288,17 @@ class EmeraldHWS():
                 self.logger.info(f"emeraldhws: awsiot: MQTT CONNACK reason: {reason_code} - {reason_string}")
             else:
                 self.logger.info(f"emeraldhws: awsiot: MQTT CONNACK reason code: {reason_code}")
+
+            # Log all CONNACK properties if available
+            if hasattr(connack, '__dict__'):
+                self.logger.debug(f"emeraldhws: awsiot: CONNACK details: {connack.__dict__}")
+        else:
+            self.logger.debug("emeraldhws: awsiot: no CONNACK packet available in failure data")
+
+        # Log the exception data structure itself for deeper debugging
+        if hasattr(lifecycle_connection_failure, '__dict__'):
+            self.logger.debug(f"emeraldhws: awsiot: failure data: {lifecycle_connection_failure.__dict__}")
+
         return
 
     def on_lifecycle_stopped(self, lifecycle_stopped_data: mqtt5.LifecycleStoppedData):
@@ -278,19 +313,26 @@ class EmeraldHWS():
         # Extract disconnect reason if available
         reason = "unknown reason"
         if hasattr(lifecycle_disconnect_data, 'disconnect_packet') and lifecycle_disconnect_data.disconnect_packet:
-            reason_code = getattr(lifecycle_disconnect_data.disconnect_packet, 'reason_code', 'unknown')
-            reason_string = getattr(lifecycle_disconnect_data.disconnect_packet, 'reason_string', '')
+            disconnect_packet = lifecycle_disconnect_data.disconnect_packet
+            reason_code = getattr(disconnect_packet, 'reason_code', 'unknown')
+            reason_string = getattr(disconnect_packet, 'reason_string', '')
             reason = f"reason code: {reason_code}" + (f" - {reason_string}" if reason_string else "")
-        
+
+            # Log full disconnect packet details at debug level
+            if hasattr(disconnect_packet, '__dict__'):
+                self.logger.debug(f"emeraldhws: awsiot: disconnect packet details: {disconnect_packet.__dict__}")
+        else:
+            # Log the disconnect data structure if no packet available
+            if hasattr(lifecycle_disconnect_data, '__dict__'):
+                self.logger.debug(f"emeraldhws: awsiot: disconnect data: {lifecycle_disconnect_data.__dict__}")
+
         self.logger.info(f"emeraldhws: awsiot: disconnected - {reason}")
         return
 
     def on_lifecycle_attempting_connect(self, lifecycle_attempting_connect_data: mqtt5.LifecycleAttemptingConnectData):
         """ Log message when attempting connect
         """
-        # Include endpoint information if available
-        endpoint = getattr(lifecycle_attempting_connect_data, 'endpoint', 'unknown')
-        self.logger.debug(f"emeraldhws: awsiot: attempting to connect to {endpoint}")
+        self.logger.debug("emeraldhws: awsiot: attempting to connect")
         return
         
     def check_connection_health(self):
