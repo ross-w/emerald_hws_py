@@ -109,9 +109,28 @@ class EmeraldHWS():
 
         if post_response_json.get("code") == 200:
             self.logger.debug("emeraldhws: Successfully logged into Emerald API")
-            self.properties = post_response_json.get("info").get("property")
+            with self._state_lock:
+                self.properties = post_response_json.get("info").get("property")
         else:
             raise Exception("Unable to fetch properties from Emerald API")
+
+    def _wait_for_properties(self, timeout=30):
+        """
+        Wait for properties to be populated and return a thread-safe copy.
+        Blocks until properties is a non-empty list or timeout occurs.
+
+        :param timeout: Maximum seconds to wait
+        :returns: List of properties
+        :raises: Exception if timeout or properties not available
+        """
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            with self._state_lock:
+                if isinstance(self.properties, list) and len(self.properties) > 0:
+                    return list(self.properties)  # Return a copy
+            time.sleep(0.1)  # Small delay before retry
+
+        raise Exception("Timeout waiting for properties to be populated")
 
     def replaceCallback(self, update_callback):
         """ Replaces the current registered update callback (if any) with the supplied
@@ -555,9 +574,10 @@ class EmeraldHWS():
         if not self._is_connected:
             self.connect()
 
+        properties_list = self._wait_for_properties()
         hws = []
 
-        for properties in self.properties:
+        for properties in properties_list:
             heat_pumps = properties.get('heat_pump', [])
             for heat_pump in heat_pumps:
                 hws.append(heat_pump["id"])
@@ -568,10 +588,8 @@ class EmeraldHWS():
         """ Subscribes to updates from all detected HWS
         """
 
-        if not self.properties:
-            self.getAllHWS()
-
-        for property in self.properties:
+        properties_list = self._wait_for_properties()
+        for property in properties_list:
             for hws in property.get("heat_pump"):
                 self.subscribeForUpdates(hws.get("id"))
 
