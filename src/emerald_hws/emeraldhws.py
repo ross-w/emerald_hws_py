@@ -41,6 +41,9 @@ class EmeraldHWS():
         self.update_callback = update_callback
         self._state_lock = threading.RLock()  # Thread-safe lock for state operations
         self._connection_event = threading.Event()  # Event to signal when MQTT connection is established
+        self._connect_lock = threading.Lock()  # Lock to prevent concurrent connect() calls
+        self._mqtt_lock = threading.RLock()  # Lock to protect MQTT client lifecycle operations
+        self._is_connected = False  # Flag to track connection state
         self.mqttClient = None  # Initialize to None
 
         # Convert minutes to seconds for internal use
@@ -48,17 +51,18 @@ class EmeraldHWS():
         self.health_check_interval = health_check_minutes * 60.0 if health_check_minutes > 0 else 0
         self.last_message_time = None
         self.health_check_timer = None
+        self.reconnect_timer = None
 
         # Connection state tracking
         self.connection_state = "initial"  # possible states: initial, connected, failed
         self.consecutive_failures = 0
         self.max_backoff_seconds = 60  # Maximum backoff of 1 minute
-        
+
         # Ensure reasonable minimum values (e.g., at least 5 minutes for connection timeout)
         if connection_timeout_minutes < 5 and connection_timeout_minutes != 0:
             self.logger.warning("emeraldhws: Connection timeout too short, setting to minimum of 5 minutes")
             self.connection_timeout = 5 * 60.0
-        
+
         # Ensure reasonable minimum values for health check (e.g., at least 5 minutes)
         if 0 < health_check_minutes < 5:
             self.logger.warning("emeraldhws: Health check interval too short, setting to minimum of 5 minutes")
@@ -119,100 +123,67 @@ class EmeraldHWS():
         """ Stops an existing MQTT connection and creates a new one
         :param reason: Reason for reconnection (scheduled, health_check, etc.)
         """
-        self.logger.info(f"emeraldhws: awsiot: Reconnecting MQTT connection (reason: {reason})")
+        with self._mqtt_lock:
+            self.logger.info(f"emeraldhws: awsiot: Reconnecting MQTT connection (reason: {reason})")
 
-        # Store current temperature values for comparison after reconnect
-        temp_values = {}
-        for properties in self.properties:
-            heat_pumps = properties.get('heat_pump', [])
-            for heat_pump in heat_pumps:
-                hws_id = heat_pump['id']
-                if 'last_state' in heat_pump and 'temp_current' in heat_pump['last_state']:
-                    temp_values[hws_id] = heat_pump['last_state']['temp_current']
+            if self.mqttClient is not None:
+                self.mqttClient.stop()
+                self.mqttClient = None  # Clear the client so a new one can be created
 
-        if self.mqttClient is not None:
-            self.mqttClient.stop()
-            self.mqttClient = None  # Clear the client so a new one can be created
+            self.connectMQTT()
+            self.subscribeAllHWS()
 
-        self.connectMQTT()
-        self.subscribeAllHWS()
-        
-        # After reconnection, check if temperatures have changed
-        def check_temp_changes():
-            for properties in self.properties:
-                heat_pumps = properties.get('heat_pump', [])
-                for heat_pump in heat_pumps:
-                    hws_id = heat_pump['id']
-                    if (hws_id in temp_values and 
-                        'last_state' in heat_pump and 
-                        'temp_current' in heat_pump['last_state']):
-                        old_temp = temp_values[hws_id]
-                        new_temp = heat_pump['last_state']['temp_current']
-                        if old_temp != new_temp:
-                            self.logger.info(f"emeraldhws: Temperature changed after reconnect for {hws_id}: {old_temp} → {new_temp}")
-        
-        # Check for temperature changes after a short delay to allow for updates
-        threading.Timer(10.0, check_temp_changes).start()
+            self.logger.info(f"emeraldhws: awsiot: MQTT reconnection completed (reason: {reason})")
 
     def connectMQTT(self):
         """ Establishes a connection to Amazon IOT core's MQTT service
         """
+        with self._mqtt_lock:
+            # If already connected, skip
+            if self.mqttClient is not None:
+                self.logger.debug("emeraldhws: awsiot: MQTT client already exists, skipping connection")
+                return
 
-        # If already connected, skip
-        if self.mqttClient is not None:
-            self.logger.debug("emeraldhws: awsiot: MQTT client already exists, skipping connection")
-            return
+            # Clear the connection event before starting new connection
+            self._connection_event.clear()
 
-        # Clear the connection event before starting new connection
-        self._connection_event.clear()
+            # Certificate path is available but not currently used in the connection
+            # os.path.join(os.path.dirname(__file__), '__assets__', 'SFSRootCAG2.pem')
+            identityPoolID = self.COGNITO_IDENTITY_POOL_ID
+            region = self.MQTT_HOST.split('.')[2]
+            cognito_endpoint = "cognito-identity." + region + ".amazonaws.com"
+            cognitoIdentityClient = boto3.client('cognito-identity', region_name=region)
 
-        # Certificate path is available but not currently used in the connection
-        # os.path.join(os.path.dirname(__file__), '__assets__', 'SFSRootCAG2.pem')
-        identityPoolID = self.COGNITO_IDENTITY_POOL_ID
-        region = self.MQTT_HOST.split('.')[2]
-        cognito_endpoint = "cognito-identity." + region + ".amazonaws.com"
-        cognitoIdentityClient = boto3.client('cognito-identity', region_name=region)
+            temporaryIdentityId = cognitoIdentityClient.get_id(IdentityPoolId=identityPoolID)
+            identityID = temporaryIdentityId["IdentityId"]
+            self.logger.debug("emeraldhws: awsiot: AWS IoT IdentityID: {}".format(identityID))
 
-        temporaryIdentityId = cognitoIdentityClient.get_id(IdentityPoolId=identityPoolID)
-        identityID = temporaryIdentityId["IdentityId"]
-        self.logger.debug("emeraldhws: awsiot: AWS IoT IdentityID: {}".format(identityID))
+            credentials_provider = auth.AwsCredentialsProvider.new_cognito(
+                    endpoint=cognito_endpoint,
+                    identity=identityID,
+                    tls_ctx=io.ClientTlsContext(io.TlsContextOptions()))
 
-        credentials_provider = auth.AwsCredentialsProvider.new_cognito(
-                endpoint=cognito_endpoint,
-                identity=identityID,
-                tls_ctx=io.ClientTlsContext(io.TlsContextOptions()))
+            client = mqtt5_client_builder.websockets_with_default_aws_signing(
+                endpoint = self.MQTT_HOST,
+                region = region,
+                credentials_provider = credentials_provider,
+                on_connection_interrupted = self.on_connection_interrupted,
+                on_connection_resumed = self.on_connection_resumed,
+                on_lifecycle_connection_success = self.on_lifecycle_connection_success,
+                on_lifecycle_stopped = self.on_lifecycle_stopped,
+                on_lifecycle_attempting_connect = self.on_lifecycle_attempting_connect,
+                on_lifecycle_disconnection = self.on_lifecycle_disconnection,
+                on_lifecycle_connection_failure = self.on_lifecycle_connection_failure,
+                on_publish_received = self.mqttCallback
+            )
 
-        client = mqtt5_client_builder.websockets_with_default_aws_signing(
-            endpoint = self.MQTT_HOST,
-            region = region,
-            credentials_provider = credentials_provider,
-            on_connection_interrupted = self.on_connection_interrupted,
-            on_connection_resumed = self.on_connection_resumed,
-            on_lifecycle_connection_success = self.on_lifecycle_connection_success,
-            on_lifecycle_stopped = self.on_lifecycle_stopped,
-            on_lifecycle_attempting_connect = self.on_lifecycle_attempting_connect,
-            on_lifecycle_disconnection = self.on_lifecycle_disconnection,
-            on_lifecycle_connection_failure = self.on_lifecycle_connection_failure,
-            on_publish_received = self.mqttCallback
-        )
+            client.start()
+            self.mqttClient = client
 
-        client.start()
-        self.mqttClient = client
-
-        # Block until connection is established or timeout (30 seconds)
-        if not self._connection_event.wait(timeout=30):
-            self.logger.warning("emeraldhws: awsiot: Connection establishment timed out after 30 seconds")
-            # Continue anyway - the connection may still succeed asynchronously
-
-        # Schedule periodic reconnection using configurable timeout
-        if self.connection_timeout > 0:
-            threading.Timer(self.connection_timeout, self.reconnectMQTT).start()
-
-        # Start health check timer if enabled
-        if self.health_check_interval > 0:
-            self.health_check_timer = threading.Timer(self.health_check_interval, self.check_connection_health)
-            self.health_check_timer.daemon = True
-            self.health_check_timer.start()
+            # Block until connection is established or timeout (30 seconds)
+            if not self._connection_event.wait(timeout=30):
+                self.logger.warning("emeraldhws: awsiot: Connection establishment timed out after 30 seconds")
+                # Continue anyway - the connection may still succeed asynchronously
 
     def mqttDecodeUpdate(self, topic, payload):
         """ Attempt to decode a received MQTT message and direct appropriately
@@ -334,9 +305,21 @@ class EmeraldHWS():
         """
         self.logger.debug("emeraldhws: awsiot: attempting to connect")
         return
-        
+
+    def scheduled_reconnect(self):
+        """ Periodic MQTT reconnect - called by timer and reschedules itself
+        """
+        self.reconnectMQTT(reason="scheduled")
+
+        # Reschedule for next time
+        if self.connection_timeout > 0:
+            self.reconnect_timer = threading.Timer(self.connection_timeout, self.scheduled_reconnect)
+            self.reconnect_timer.daemon = True
+            self.reconnect_timer.start()
+
     def check_connection_health(self):
         """ Check if we've received any messages recently, reconnect if not
+        Called by timer and reschedules itself
         """
         if self.last_message_time is None:
             # No messages received yet, don't reconnect
@@ -345,24 +328,24 @@ class EmeraldHWS():
             current_time = time.time()
             time_since_last_message = current_time - self.last_message_time
             minutes_since_last = time_since_last_message / 60.0
-            
+
             if time_since_last_message > self.health_check_interval:
                 # This is an INFO level log because it's an important event
                 self.logger.info(f"emeraldhws: awsiot: No messages received for {minutes_since_last:.1f} minutes, reconnecting")
-                
+
                 # If we're in a failed state, apply exponential backoff
                 if self.connection_state == "failed" and self.consecutive_failures > 0:
                     # Calculate backoff time with exponential increase, capped at max_backoff_seconds
                     backoff_seconds = min(2 ** (self.consecutive_failures - 1), self.max_backoff_seconds)
                     self.logger.info(f"emeraldhws: awsiot: Connection in failed state, applying backoff of {backoff_seconds} seconds before retry (attempt {self.consecutive_failures})")
                     time.sleep(backoff_seconds)
-                
+
                 self.reconnectMQTT(reason="health_check")
             else:
                 # This is a DEBUG level log to avoid cluttering logs
                 self.logger.debug(f"emeraldhws: awsiot: Health check - Last message received {minutes_since_last:.1f} minutes ago")
-        
-        # Schedule next health check
+
+        # Always reschedule next health check
         if self.health_check_interval > 0:
             self.health_check_timer = threading.Timer(self.health_check_interval, self.check_connection_health)
             self.health_check_timer.daemon = True
@@ -381,7 +364,7 @@ class EmeraldHWS():
                 for heat_pump in heat_pumps:
                     if heat_pump['id'] == id:
                         heat_pump['last_state'][key] = value
-        
+
         # Call callback AFTER releasing lock to avoid potential deadlocks
         if self.update_callback is not None:
             self.update_callback()
@@ -390,25 +373,26 @@ class EmeraldHWS():
         """ Subscribes to the MQTT topics for the supplied HWS
         :param id: The UUID of the requested HWS
         """
-        if not self.mqttClient:
-            self.connectMQTT()
+        with self._mqtt_lock:
+            if not self.mqttClient:
+                self.connectMQTT()
 
-        mqtt_topic = "ep/heat_pump/from_gw/{}".format(id)
-        subscribe_future = self.mqttClient.subscribe(
-                subscribe_packet=mqtt5.SubscribePacket(
-                        subscriptions=[mqtt5.Subscription(
-                        topic_filter=mqtt_topic,
-                        qos=mqtt5.QoS.AT_LEAST_ONCE)]))
+            mqtt_topic = "ep/heat_pump/from_gw/{}".format(id)
+            subscribe_future = self.mqttClient.subscribe(
+                    subscribe_packet=mqtt5.SubscribePacket(
+                            subscriptions=[mqtt5.Subscription(
+                            topic_filter=mqtt_topic,
+                            qos=mqtt5.QoS.AT_LEAST_ONCE)]))
 
-        # Wait for subscription to complete
-        subscribe_future.result(20)
+            # Wait for subscription to complete
+            subscribe_future.result(20)
 
     def getFullStatus(self, id):
         """ Returns a dict with the full status of the specified HWS
         :param id: UUID of the HWS to get the status for
         """
 
-        if not self.properties:
+        if not self._is_connected:
             self.connect()
 
         with self._state_lock:
@@ -425,7 +409,7 @@ class EmeraldHWS():
         :param payload: JSON payload to send eg {"switch":1}
         """
 
-        if not self.properties:
+        if not self._is_connected:
             self.connect()
 
         hwsdetail = self.getFullStatus(id)
@@ -443,11 +427,17 @@ class EmeraldHWS():
                payload
               ]
         mqtt_topic = "ep/heat_pump/to_gw/{}".format(id)
-        publish_future = self.mqttClient.publish(
-                mqtt5.PublishPacket(
-                        topic=mqtt_topic,
-                        payload=json.dumps(msg),
-                        qos=mqtt5.QoS.AT_LEAST_ONCE))
+
+        with self._mqtt_lock:
+            if not self.mqttClient:
+                raise Exception("MQTT client not connected")
+            publish_future = self.mqttClient.publish(
+                    mqtt5.PublishPacket(
+                            topic=mqtt_topic,
+                            payload=json.dumps(msg),
+                            qos=mqtt5.QoS.AT_LEAST_ONCE))
+
+        # Wait for publish to complete outside the lock
         publish_future.result(20) # 20 seconds
 
     def turnOn(self, id):
@@ -506,12 +496,12 @@ class EmeraldHWS():
                 work_state = full_status.get("last_state").get("work_state")
                 # work_state: 0=off/idle, 1=actively heating, 2=on but not heating
                 return (work_state == 1)
-            
+
             # Fallback to device_operation_status if work_state not available yet
             # (e.g., before first MQTT update after initialization)
             heating_status = full_status.get("device_operation_status")
             return (heating_status == 1)
-        
+
         return False
 
     def getHourlyEnergyUsage(self, id):
@@ -562,7 +552,7 @@ class EmeraldHWS():
     def listHWS(self):
         """ Returns a list of UUIDs of all discovered HWS
         """
-        if not self.properties:
+        if not self._is_connected:
             self.connect()
 
         hws = []
@@ -589,7 +579,27 @@ class EmeraldHWS():
         """ Connect to the API with the supplied credentials, retrieve HWS details
         :returns: True if successful
         """
-        self.getLoginToken()
-        self.getAllHWS()
-        self.connectMQTT()
-        self.subscribeAllHWS()
+        # Use lock to ensure only one thread can connect at a time
+        with self._connect_lock:
+            # Double-check pattern: check again inside the lock
+            if self._is_connected:
+                self.logger.debug("emeraldhws: Already connected, skipping")
+                return
+
+            self.logger.debug("emeraldhws: Connecting...")
+            self.getLoginToken()
+            self.getAllHWS()
+            self.connectMQTT()
+            self.subscribeAllHWS()
+            self._is_connected = True
+
+            # Start timers ONCE on initial connection
+            if self.connection_timeout > 0:
+                self.reconnect_timer = threading.Timer(self.connection_timeout, self.scheduled_reconnect)
+                self.reconnect_timer.daemon = True
+                self.reconnect_timer.start()
+
+            if self.health_check_interval > 0:
+                self.health_check_timer = threading.Timer(self.health_check_interval, self.check_connection_health)
+                self.health_check_timer.daemon = True
+                self.health_check_timer.start()
