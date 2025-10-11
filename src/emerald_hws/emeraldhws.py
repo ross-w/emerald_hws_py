@@ -157,8 +157,21 @@ class EmeraldHWS():
             self.logger.info(f"emeraldhws: awsiot: Reconnecting MQTT connection (reason: {reason})")
 
             if self.mqttClient is not None:
-                self.mqttClient.stop()
-                self.mqttClient = None  # Clear the client so a new one can be created
+                # Clear connection event before stopping
+                self._connection_event.clear()
+
+                try:
+                    # Stop the client and wait for it to fully stop
+                    stop_future = self.mqttClient.stop()
+                    if stop_future:
+                        # Wait up to 10 seconds for clean shutdown
+                        stop_future.result(timeout=10)
+                    self.logger.debug("emeraldhws: awsiot: MQTT client stopped successfully")
+                except Exception as e:
+                    self.logger.warning(f"emeraldhws: awsiot: Error stopping MQTT client: {e}")
+                finally:
+                    # Always clear the client reference
+                    self.mqttClient = None
 
             self.connectMQTT()
             self.subscribeAllHWS()
@@ -306,6 +319,8 @@ class EmeraldHWS():
         """ Log message when stopped
         """
         self.logger.debug("emeraldhws: awsiot: stopped")
+        # Clear connection event when stopped
+        self._connection_event.clear()
         return
 
     def on_lifecycle_disconnection(self, lifecycle_disconnect_data: mqtt5.LifecycleDisconnectData):
@@ -328,6 +343,9 @@ class EmeraldHWS():
                 self.logger.debug(f"emeraldhws: awsiot: disconnect data: {lifecycle_disconnect_data.__dict__}")
 
         self.logger.info(f"emeraldhws: awsiot: disconnected - {reason}")
+
+        # Clear connection event when disconnected
+        self._connection_event.clear()
         return
 
     def on_lifecycle_attempting_connect(self, lifecycle_attempting_connect_data: mqtt5.LifecycleAttemptingConnectData):
