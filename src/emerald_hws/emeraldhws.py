@@ -110,13 +110,14 @@ class EmeraldHWS():
         if post_response_json.get("code") == 200:
             self.logger.debug("emeraldhws: Successfully logged into Emerald API")
             property_data = post_response_json.get("info", {}).get("property")
-            self.logger.debug(f"emeraldhws: API returned property data: {property_data}")
 
             with self._state_lock:
                 self.properties = property_data
 
             # Check if we got valid data
             if not isinstance(property_data, list) or len(property_data) == 0:
+                # Log the full response when properties are invalid to help diagnose the issue
+                self.logger.debug(f"emeraldhws: Poperties empty/invalid, full response: {post_response_json}")
                 raise Exception("No heat pumps found on account - API returned empty or invalid property list")
         else:
             raise Exception("Unable to fetch properties from Emerald API")
