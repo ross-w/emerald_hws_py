@@ -109,8 +109,15 @@ class EmeraldHWS():
 
         if post_response_json.get("code") == 200:
             self.logger.debug("emeraldhws: Successfully logged into Emerald API")
+            property_data = post_response_json.get("info", {}).get("property")
+            self.logger.debug(f"emeraldhws: API returned property data: {property_data}")
+
             with self._state_lock:
-                self.properties = post_response_json.get("info").get("property")
+                self.properties = property_data
+
+            # Check if we got valid data
+            if not isinstance(property_data, list) or len(property_data) == 0:
+                raise Exception("No heat pumps found on account - API returned empty or invalid property list")
         else:
             raise Exception("Unable to fetch properties from Emerald API")
 
@@ -130,7 +137,10 @@ class EmeraldHWS():
                     return list(self.properties)  # Return a copy
             time.sleep(0.1)  # Small delay before retry
 
-        raise Exception("Timeout waiting for properties to be populated")
+        # Timeout - provide detailed error message
+        with self._state_lock:
+            final_value = self.properties
+        raise Exception(f"Timeout waiting for properties to be populated. Current value: {type(final_value).__name__} = {final_value}")
 
     def replaceCallback(self, update_callback):
         """ Replaces the current registered update callback (if any) with the supplied
