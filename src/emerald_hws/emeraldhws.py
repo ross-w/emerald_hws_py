@@ -228,7 +228,9 @@ class EmeraldHWS():
                 on_lifecycle_attempting_connect = self.on_lifecycle_attempting_connect,
                 on_lifecycle_disconnection = self.on_lifecycle_disconnection,
                 on_lifecycle_connection_failure = self.on_lifecycle_connection_failure,
-                on_publish_received = self.mqttCallback
+                on_publish_received = self.mqttCallback,
+                # The default keep-alive is 20 minutes, which we might want to reduce
+                # keep_alive_interval_sec = 60,
             )
 
             client.start()
@@ -288,7 +290,7 @@ class EmeraldHWS():
     def on_lifecycle_connection_failure(self, lifecycle_connection_failure: mqtt5.LifecycleConnectFailureData):
         """ Log message when connection failed
         """
-        error = lifecycle_connection_failure.error
+        error = lifecycle_connection_failure.exception
         error_code = getattr(error, 'code', 'unknown')
         error_name = getattr(error, 'name', 'unknown')
         error_message = str(error)
@@ -317,6 +319,11 @@ class EmeraldHWS():
             # Log all CONNACK properties if available
             if hasattr(connack, '__dict__'):
                 self.logger.debug(f"emeraldhws: awsiot: CONNACK details: {connack.__dict__}")
+            
+            if reason_code == mqtt5.ConnectReasonCode.CLIENT_IDENTIFIER_NOT_VALID:
+                self.logger.debug("emeraldhws: awsiot: The client identifier is not valid. Getting a new login token.")
+                self.getLoginToken()
+                self.reconnectMQTT(reason="invalid_client_id")
         else:
             self.logger.debug("emeraldhws: awsiot: no CONNACK packet available in failure data")
 
@@ -357,6 +364,7 @@ class EmeraldHWS():
 
         # Clear connection event when disconnected
         self._connection_event.clear()
+        self._is_connected = False
         return
 
     def on_lifecycle_attempting_connect(self, lifecycle_attempting_connect_data: mqtt5.LifecycleAttemptingConnectData):
@@ -433,8 +441,12 @@ class EmeraldHWS():
         :param id: The UUID of the requested HWS
         """
         with self._mqtt_lock:
-            if not self.mqttClient:
+            retry = 0
+            while not self.mqttClient:
                 self.connectMQTT()
+                if retry >= 3:
+                    raise Exception("MQTT client not connected after multiple attempts")
+                retry += 1
 
             mqtt_topic = "ep/heat_pump/from_gw/{}".format(id)
             subscribe_future = self.mqttClient.subscribe(
