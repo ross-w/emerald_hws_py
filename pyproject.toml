@@ -14,7 +14,7 @@ dependencies = [
 authors = [{ name = "Ross Williamson", email = "ross@inertia.net.nz" }]
 description = "A package to manipulate and monitor Emerald Heat Pump Hot Water Systems"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
