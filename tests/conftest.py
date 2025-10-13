@@ -330,6 +330,36 @@ MQTT_MSG_WORK_STATE_IDLE = b'[{\n\t\t"msg_id":\t"6c180000",\n\t\t"namespace":\t"
 MQTT_MSG_CONTROL_RESPONSE_OK = b'[{\n\t\t"msg_id":\t"121",\n\t\t"namespace":\t"business",\n\t\t"command":\t"control",\n\t\t"direction":\t"gw2app",\n\t\t"property_id":\t"prop-aaaa-1111-bbbb-2222",\n\t\t"device_id":\t"hws-1111-aaaa-2222-bbbb"\n\t}, {\n\t\t"result":\t"ok",\n\t\t"switch":\t0\n\t}]'
 
 
+def make_mqtt_update(device_id, property_id, **updates):
+    """Factory for creating MQTT update messages.
+
+    Args:
+        device_id: Device UUID (e.g., "hws-1111-aaaa-2222-bbbb")
+        property_id: Property UUID (e.g., "prop-aaaa-1111-bbbb-2222")
+        **updates: Key-value pairs for the update payload (e.g., temp_current=59, switch=1)
+
+    Returns:
+        bytes: Encoded MQTT message in Emerald's expected format
+
+    Example:
+        >>> make_mqtt_update("hws-123", "prop-456", temp_current=59, switch=1)
+        b'[{"msg_id":"...", "namespace":"business", ...}, {"temp_current":59, "switch":1}]'
+    """
+    import random
+    msg = [
+        {
+            "msg_id": f"{random.randint(10000000, 99999999)}",
+            "namespace": "business",
+            "command": "upload_status",
+            "direction": "gw2app",
+            "property_id": property_id,
+            "device_id": device_id
+        },
+        updates
+    ]
+    return json.dumps(msg).encode('utf-8')
+
+
 @pytest.fixture
 def mock_requests(mocker):
     """Mock requests library for API calls."""

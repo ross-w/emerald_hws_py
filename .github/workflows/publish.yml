@@ -49,6 +49,12 @@ jobs:
     if: needs.security-check.outputs.is-authorized == 'true'
     uses: ./.github/workflows/lint.yml
 
+  test:
+    name: "Test Suite"
+    needs: security-check
+    if: needs.security-check.outputs.is-authorized == 'true'
+    uses: ./.github/workflows/test.yml
+
   smoke-test:
     name: "Smoke Test"
     needs: security-check
@@ -103,7 +109,7 @@ jobs:
   # Build package
   build:
     name: "Build Package"
-    needs: [security-check, lint, smoke-test, version-check]
+    needs: [security-check, lint, test, smoke-test, version-check]
     if: needs.security-check.outputs.is-authorized == 'true'
     runs-on: ubuntu-latest
 
@@ -160,7 +166,7 @@ jobs:
   # Publish using PyPI Trusted Publishing (OIDC)
   publish:
     name: "Publish to PyPI"
-    needs: [security-check, lint, smoke-test, version-check, build]
+    needs: [security-check, lint, test, smoke-test, version-check, build]
     if: needs.security-check.outputs.is-authorized == 'true'
     runs-on: ubuntu-latest
 
