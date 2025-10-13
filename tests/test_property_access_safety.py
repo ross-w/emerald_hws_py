@@ -7,254 +7,194 @@ These tests ensure the module handles API changes gracefully, such as:
 
 These are regression tests to prevent crashes when the API returns unexpected data.
 """
-import copy
+
 import pytest
-from emerald_hws import EmeraldHWS
-from .conftest import MOCK_PROPERTY_RESPONSE_SELF
 
 
-def test_is_on_handles_missing_last_state():
+def test_is_on_handles_missing_last_state(safety_test_client):
     """Test that isOn() handles missing last_state gracefully."""
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-
-    # Create property with no last_state
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client.properties[0]["heat_pump"][0]["last_state"] = None
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
+    safety_test_client["hws"]["last_state"] = None
 
     # Should return False, not crash
-    assert client.isOn(hws_id) is False
+    assert safety_test_client["client"].isOn(safety_test_client["hws_id"]) is False
 
 
-def test_is_on_handles_missing_switch_key():
+def test_is_on_handles_missing_switch_key(safety_test_client):
     """Test that isOn() handles missing 'switch' key in last_state."""
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-
-    # Create property with last_state but no switch key
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    del client.properties[0]["heat_pump"][0]["last_state"]["switch"]
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
+    del safety_test_client["hws"]["last_state"]["switch"]
 
     # Should return False, not crash
-    assert client.isOn(hws_id) is False
+    assert safety_test_client["client"].isOn(safety_test_client["hws_id"]) is False
 
 
-def test_is_on_handles_numeric_switch():
+def test_is_on_handles_numeric_switch(safety_test_client):
     """Test that isOn() correctly handles switch=1 (numeric)."""
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
+    hws = safety_test_client["hws"]
+    client = safety_test_client["client"]
+    hws_id = safety_test_client["hws_id"]
 
     # Test with numeric 1
-    client.properties[0]["heat_pump"][0]["last_state"]["switch"] = 1
+    hws["last_state"]["switch"] = 1
     assert client.isOn(hws_id) is True
 
     # Test with numeric 0
-    client.properties[0]["heat_pump"][0]["last_state"]["switch"] = 0
+    hws["last_state"]["switch"] = 0
     assert client.isOn(hws_id) is False
 
 
-def test_is_on_handles_string_switch():
+def test_is_on_handles_string_switch(safety_test_client):
     """Test that isOn() correctly handles switch="on" (string)."""
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
+    hws = safety_test_client["hws"]
+    client = safety_test_client["client"]
+    hws_id = safety_test_client["hws_id"]
 
     # Test with string "on"
-    client.properties[0]["heat_pump"][0]["last_state"]["switch"] = "on"
+    hws["last_state"]["switch"] = "on"
     assert client.isOn(hws_id) is True
 
     # Test with string "off"
-    client.properties[0]["heat_pump"][0]["last_state"]["switch"] = "off"
+    hws["last_state"]["switch"] = "off"
     assert client.isOn(hws_id) is False
 
 
-def test_is_heating_handles_missing_work_state():
+def test_is_heating_handles_missing_work_state(safety_test_client):
     """Test that isHeating() falls back to device_operation_status when work_state missing."""
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
+    hws = safety_test_client["hws"]
+    client = safety_test_client["client"]
+    hws_id = safety_test_client["hws_id"]
 
     # Remove work_state to test fallback
-    client.properties[0]["heat_pump"][0]["last_state"].pop("work_state", None)
+    hws["last_state"].pop("work_state", None)
 
     # Set device_operation_status to heating
-    client.properties[0]["heat_pump"][0]["device_operation_status"] = 1
+    hws["device_operation_status"] = 1
     assert client.isHeating(hws_id) is True
 
     # Set device_operation_status to not heating
-    client.properties[0]["heat_pump"][0]["device_operation_status"] = 2
+    hws["device_operation_status"] = 2
     assert client.isHeating(hws_id) is False
 
 
-def test_is_heating_handles_no_status_fields():
+def test_is_heating_handles_no_status_fields(safety_test_client):
     """Test that isHeating() handles missing both work_state and device_operation_status."""
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
+    hws = safety_test_client["hws"]
 
     # Remove work_state
-    client.properties[0]["heat_pump"][0]["last_state"].pop("work_state", None)
+    hws["last_state"].pop("work_state", None)
 
     # Remove device_operation_status
-    client.properties[0]["heat_pump"][0].pop("device_operation_status", None)
+    hws.pop("device_operation_status", None)
 
     # Should return False, not crash
-    assert client.isHeating(hws_id) is False
+    assert safety_test_client["client"].isHeating(safety_test_client["hws_id"]) is False
 
 
-def test_current_mode_handles_missing_mode():
+def test_current_mode_handles_missing_mode(safety_test_client):
     """Test that currentMode() handles missing mode gracefully."""
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
-
-    # Remove mode from last_state
-    del client.properties[0]["heat_pump"][0]["last_state"]["mode"]
+    del safety_test_client["hws"]["last_state"]["mode"]
 
     # Should return None, not crash
-    assert client.currentMode(hws_id) is None
+    assert (
+        safety_test_client["client"].currentMode(safety_test_client["hws_id"]) is None
+    )
 
 
-def test_get_hourly_energy_usage_handles_none_consumption_data():
+def test_get_hourly_energy_usage_handles_none_consumption_data(safety_test_client):
     """Test that getHourlyEnergyUsage() handles None consumption_data."""
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
-
-    # Set consumption_data to None
-    client.properties[0]["heat_pump"][0]["consumption_data"] = None
+    safety_test_client["hws"]["consumption_data"] = None
 
     # Should return None, not crash
-    assert client.getHourlyEnergyUsage(hws_id) is None
+    assert (
+        safety_test_client["client"].getHourlyEnergyUsage(safety_test_client["hws_id"])
+        is None
+    )
 
 
-def test_get_hourly_energy_usage_handles_malformed_json():
+def test_get_hourly_energy_usage_handles_malformed_json(safety_test_client):
     """Test that getHourlyEnergyUsage() handles malformed JSON in consumption_data."""
     import json as json_module
 
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
-
     # Set consumption_data to invalid JSON string
-    client.properties[0]["heat_pump"][0]["consumption_data"] = "not valid json"
+    safety_test_client["hws"]["consumption_data"] = "not valid json"
 
     # Should raise a JSONDecodeError
     with pytest.raises(json_module.JSONDecodeError):
-        client.getHourlyEnergyUsage(hws_id)
+        safety_test_client["client"].getHourlyEnergyUsage(safety_test_client["hws_id"])
 
 
-def test_get_hourly_energy_usage_handles_missing_fields():
+def test_get_hourly_energy_usage_handles_missing_fields(safety_test_client):
     """Test that getHourlyEnergyUsage() handles missing current_hour or last_data_at."""
     import json
 
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
-
     # Set consumption_data with missing fields
     incomplete_data = {"past_seven_days": {}}
-    client.properties[0]["heat_pump"][0]["consumption_data"] = json.dumps(incomplete_data)
+    safety_test_client["hws"]["consumption_data"] = json.dumps(incomplete_data)
 
     # Should return None, not crash
-    assert client.getHourlyEnergyUsage(hws_id) is None
+    assert (
+        safety_test_client["client"].getHourlyEnergyUsage(safety_test_client["hws_id"])
+        is None
+    )
 
 
-def test_get_info_handles_missing_fields():
+def test_get_info_handles_missing_fields(safety_test_client):
     """Test that getInfo() handles devices with missing optional fields."""
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
+    hws = safety_test_client["hws"]
+    hws_id = safety_test_client["hws_id"]
 
     # Remove some fields
-    del client.properties[0]["heat_pump"][0]["serial_number"]
-    del client.properties[0]["heat_pump"][0]["brand"]
+    del hws["serial_number"]
+    del hws["brand"]
 
     # Should still return dict with None values, not crash
-    info = client.getInfo(hws_id)
+    info = safety_test_client["client"].getInfo(hws_id)
     assert info is not None
     assert info["id"] == hws_id
     assert info["serial_number"] is None
     assert info["brand"] is None
 
 
-def test_get_full_status_handles_nonexistent_device():
+def test_get_full_status_handles_nonexistent_device(safety_test_client):
     """Test that getFullStatus() returns None for non-existent device."""
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-    client.properties = MOCK_PROPERTY_RESPONSE_SELF["info"]["property"]
-
     # Query non-existent device
-    status = client.getFullStatus("nonexistent-id")
+    status = safety_test_client["client"].getFullStatus("nonexistent-id")
 
     # Should return None, not crash
     assert status is None
 
 
-def test_update_hws_state_handles_nonexistent_device():
+def test_update_hws_state_handles_nonexistent_device(safety_test_client):
     """Test that updateHWSState() gracefully handles non-existent device."""
-    client = EmeraldHWS("test@example.com", "password")
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
+    hws = safety_test_client["hws"]
 
     # Store the original value before attempting update
-    original_temp = client.properties[0]["heat_pump"][0]["last_state"]["temp_current"]
+    original_temp = hws["last_state"]["temp_current"]
 
     # Update non-existent device - should not crash
-    client.updateHWSState("nonexistent-id", "temp_current", 55)
+    safety_test_client["client"].updateHWSState("nonexistent-id", "temp_current", 55)
 
     # Original device should be unchanged
-    hws = client.properties[0]["heat_pump"][0]
     assert hws["last_state"]["temp_current"] == original_temp
 
 
-@pytest.mark.parametrize("switch_value,expected", [
-    (1, True),     # Numeric 1 should be on
-    ("on", True),  # String "on" should be on
-    (True, True),  # Boolean True == 1 in Python, so it matches
-])
-def test_switch_truthy_values_handled_correctly(switch_value, expected):
+@pytest.mark.parametrize(
+    "switch_value,expected",
+    [
+        (1, True),  # Numeric 1 should be on
+        ("on", True),  # String "on" should be on
+        (True, True),  # Boolean True == 1 in Python, so it matches
+    ],
+)
+def test_switch_truthy_values_handled_correctly(
+    safety_test_client, switch_value, expected
+):
     """Test that truthy switch values are handled correctly."""
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
-
-    client.properties[0]["heat_pump"][0]["last_state"]["switch"] = switch_value
-    assert client.isOn(hws_id) is expected
+    safety_test_client["hws"]["last_state"]["switch"] = switch_value
+    assert safety_test_client["client"].isOn(safety_test_client["hws_id"]) is expected
 
 
 @pytest.mark.parametrize("switch_value", [0, "off", False, None])
-def test_switch_falsy_values_handled_correctly(switch_value):
+def test_switch_falsy_values_handled_correctly(safety_test_client, switch_value):
     """Test that falsy switch values are correctly treated as off."""
-    client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
-    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-
-    hws_id = "hws-1111-aaaa-2222-bbbb"
-
-    client.properties[0]["heat_pump"][0]["last_state"]["switch"] = switch_value
-    assert client.isOn(hws_id) is False
+    safety_test_client["hws"]["last_state"]["switch"] = switch_value
+    assert safety_test_client["client"].isOn(safety_test_client["hws_id"]) is False

@@ -4,6 +4,7 @@ These tests ensure that control commands (turn on/off, mode changes) construct
 the correct MQTT message structure. This catches regressions if the payload
 format is accidentally changed.
 """
+
 import json
 import pytest
 from unittest.mock import Mock
@@ -14,16 +15,26 @@ from .conftest import (
 )
 
 
-@pytest.mark.parametrize("method_name,method_args,expected_payload", [
-    ("turnOn", [], {"switch": 1}),
-    ("turnOff", [], {"switch": 0}),
-    ("setNormalMode", [], {"mode": 1}),
-    ("setBoostMode", [], {"mode": 0}),
-    ("setQuietMode", [], {"mode": 2}),
-])
+@pytest.mark.parametrize(
+    "method_name,method_args,expected_payload",
+    [
+        ("turnOn", [], {"switch": 1}),
+        ("turnOff", [], {"switch": 0}),
+        ("setNormalMode", [], {"mode": 1}),
+        ("setBoostMode", [], {"mode": 0}),
+        ("setQuietMode", [], {"mode": 2}),
+    ],
+)
 def test_control_operations_send_correct_payload(
-    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker,
-    method_name, method_args, expected_payload
+    mock_requests,
+    mock_boto3,
+    mock_mqtt5_client_builder,
+    mock_auth,
+    mock_io,
+    mocker,
+    method_name,
+    method_args,
+    expected_payload,
 ):
     """Test that control operations send correct MQTT message structure and payload."""
     # Setup mocks
@@ -47,7 +58,9 @@ def test_control_operations_send_correct_payload(
     method(hws_id, *method_args)
 
     # Get the MQTT client mock and verify publish was called
-    mqtt_client = mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    mqtt_client = (
+        mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    )
     mqtt_client.publish.assert_called_once()
 
     # Extract the publish packet from the call
@@ -56,8 +69,9 @@ def test_control_operations_send_correct_payload(
 
     # Verify topic
     expected_topic = f"ep/heat_pump/to_gw/{hws_id}"
-    assert publish_packet.topic == expected_topic, \
+    assert publish_packet.topic == expected_topic, (
         f"Expected topic '{expected_topic}', got '{publish_packet.topic}'"
+    )
 
     # Parse and verify payload structure
     payload = json.loads(publish_packet.payload)
@@ -78,8 +92,9 @@ def test_control_operations_send_correct_payload(
 
     # Second element is the control payload
     control_payload = payload[1]
-    assert control_payload == expected_payload, \
+    assert control_payload == expected_payload, (
         f"Expected payload {expected_payload}, got {control_payload}"
+    )
 
 
 def test_control_message_includes_property_details(
@@ -104,7 +119,9 @@ def test_control_message_includes_property_details(
     client.turnOn(hws_id)
 
     # Extract the payload
-    mqtt_client = mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    mqtt_client = (
+        mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    )
     call_args = mqtt_client.publish.call_args
     publish_packet = call_args[0][0]
     payload = json.loads(publish_packet.payload)
@@ -141,7 +158,9 @@ def test_control_message_fails_for_nonexistent_device(
     assert "Unable to find HWS" in str(exc_info.value)
 
     # Verify no MQTT message was sent
-    mqtt_client = mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    mqtt_client = (
+        mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    )
     mqtt_client.publish.assert_not_called()
 
 
@@ -167,7 +186,9 @@ def test_control_message_topic_format(
     client.setBoostMode(hws_id)
 
     # Verify topic format
-    mqtt_client = mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    mqtt_client = (
+        mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    )
     call_args = mqtt_client.publish.call_args
     publish_packet = call_args[0][0]
 

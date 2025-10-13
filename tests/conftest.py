@@ -1,6 +1,6 @@
 """Shared fixtures and mock data for tests."""
+
 import json
-import threading
 from unittest.mock import Mock
 import pytest
 
@@ -9,155 +9,158 @@ import pytest
 MOCK_LOGIN_RESPONSE = {
     "code": 200,
     "message": "Login successful",
-    "token": "mock_jwt_token_12345"
+    "token": "mock_jwt_token_12345",
 }
 
-MOCK_LOGIN_FAILURE_RESPONSE = {
-    "code": 401,
-    "message": "Invalid credentials"
-}
+MOCK_LOGIN_FAILURE_RESPONSE = {"code": 401, "message": "Invalid credentials"}
 
 # Property with heat pump in "property" array (Self-owned)
 MOCK_PROPERTY_RESPONSE_SELF = {
     "code": 200,
     "message": "Property list",
     "info": {
-        "property": [{
-            "id": "prop-aaaa-1111-bbbb-2222",
-            "customer_id": "cust-cccc-3333-dddd-4444",
-            "property_name": "Test Home",
-            "house_no": None,
-            "unit_number": "2",
-            "street_type": "Street",
-            "street": "Test",
-            "city": "Melbourne",
-            "unit_type": "Unit",
-            "level_type": None,
-            "level_number": None,
-            "street_number": "123",
-            "street_suffix": None,
-            "state": "VIC",
-            "postal_code": "3000",
-            "latitude": -37.8136,
-            "longitude": 144.9631,
-            "address_type": "residential",
-            "premium": "No",
-            "is_structure_deleted": 0,
-            "accessibility": False,
-            "is_structure_updated": 0,
-            "created_at": "2024-01-12 12:26:14",
-            "updated_at": "2024-10-09 22:29:03",
-            "property_type": "Self",
-            "tariff_structure": [],
-            "member_count": 1,
-            "property_spaces": None,
-            "budget": None,
-            "location": None,
-            "devices": [],
-            "livelinks": [],
-            "safelinks": [],
-            "heat_pump": [{
-                "id": "hws-1111-aaaa-2222-bbbb",
-                "serial_number": "TEST1234567890",
-                "heat_pump_name": None,
-                "is_solar": True,
-                "is_solar_soaker_on": False,
-                "is_maintenance_required": 0,
-                "property_id": "prop-aaaa-1111-bbbb-2222",
+        "property": [
+            {
+                "id": "prop-aaaa-1111-bbbb-2222",
                 "customer_id": "cust-cccc-3333-dddd-4444",
-                "space_id": None,
-                "installer_id": None,
-                "parent_agency_id": None,
-                "agency_id": None,
-                "agency_name": None,
-                "agent_name": "Installed by customer",
-                "installer_uuid": None,
-                "multi_site_company_id": None,
-                "site_id": None,
-                "consumption_data": json.dumps({
-                    "current_hour": 0.96,
-                    "last_data_at": "2025-10-12 13:00",
-                    "past_seven_days": {
-                        "2025-10-06": 3.17,
-                        "2025-10-07": 4.14,
-                        "2025-10-08": 3.86,
-                        "2025-10-09": 4.73,
-                        "2025-10-10": 2.69,
-                        "2025-10-11": 4.08,
-                        "2025-10-12": 3.86
-                    },
-                    "monthly_consumption": {
-                        "2024-10": 84.88,
-                        "2024-11": 96.94,
-                        "2024-12": 104.17,
-                        "2025-01": 87.26,
-                        "2025-02": 75.40,
-                        "2025-03": 98.09,
-                        "2025-04": 92.56,
-                        "2025-05": 130.03,
-                        "2025-06": 167.85,
-                        "2025-07": 175.18,
-                        "2025-08": 155.80,
-                        "2025-09": 130.81,
-                        "2025-10": 46.01
+                "property_name": "Test Home",
+                "house_no": None,
+                "unit_number": "2",
+                "street_type": "Street",
+                "street": "Test",
+                "city": "Melbourne",
+                "unit_type": "Unit",
+                "level_type": None,
+                "level_number": None,
+                "street_number": "123",
+                "street_suffix": None,
+                "state": "VIC",
+                "postal_code": "3000",
+                "latitude": -37.8136,
+                "longitude": 144.9631,
+                "address_type": "residential",
+                "premium": "No",
+                "is_structure_deleted": 0,
+                "accessibility": False,
+                "is_structure_updated": 0,
+                "created_at": "2024-01-12 12:26:14",
+                "updated_at": "2024-10-09 22:29:03",
+                "property_type": "Self",
+                "tariff_structure": [],
+                "member_count": 1,
+                "property_spaces": None,
+                "budget": None,
+                "location": None,
+                "devices": [],
+                "livelinks": [],
+                "safelinks": [],
+                "heat_pump": [
+                    {
+                        "id": "hws-1111-aaaa-2222-bbbb",
+                        "serial_number": "TEST1234567890",
+                        "heat_pump_name": None,
+                        "is_solar": True,
+                        "is_solar_soaker_on": False,
+                        "is_maintenance_required": 0,
+                        "property_id": "prop-aaaa-1111-bbbb-2222",
+                        "customer_id": "cust-cccc-3333-dddd-4444",
+                        "space_id": None,
+                        "installer_id": None,
+                        "parent_agency_id": None,
+                        "agency_id": None,
+                        "agency_name": None,
+                        "agent_name": "Installed by customer",
+                        "installer_uuid": None,
+                        "multi_site_company_id": None,
+                        "site_id": None,
+                        "consumption_data": json.dumps(
+                            {
+                                "current_hour": 0.96,
+                                "last_data_at": "2025-10-12 13:00",
+                                "past_seven_days": {
+                                    "2025-10-06": 3.17,
+                                    "2025-10-07": 4.14,
+                                    "2025-10-08": 3.86,
+                                    "2025-10-09": 4.73,
+                                    "2025-10-10": 2.69,
+                                    "2025-10-11": 4.08,
+                                    "2025-10-12": 3.86,
+                                },
+                                "monthly_consumption": {
+                                    "2024-10": 84.88,
+                                    "2024-11": 96.94,
+                                    "2024-12": 104.17,
+                                    "2025-01": 87.26,
+                                    "2025-02": 75.40,
+                                    "2025-03": 98.09,
+                                    "2025-04": 92.56,
+                                    "2025-05": 130.03,
+                                    "2025-06": 167.85,
+                                    "2025-07": 175.18,
+                                    "2025-08": 155.80,
+                                    "2025-09": 130.81,
+                                    "2025-10": 46.01,
+                                },
+                            }
+                        ),
+                        "customer_status": None,
+                        "installed_by": "self",
+                        "brand": "Emerald",
+                        "model": "model",
+                        "hw_version": "V1.0.0",
+                        "soft_version": "V1.0.34",
+                        "mac_address": "aabbccddeeff",
+                        "wifi_name": "TestWiFi",
+                        "ip_address": None,
+                        "status": "active",
+                        "connection_type": "Bluetooth",
+                        "upgradable": 0,
+                        "force_update": 0,
+                        "available_firmware": "1.0.33",
+                        "heat_pump_type": "type-5555-6666-7777-8888",
+                        "radius": 200,
+                        "latitude": None,
+                        "longitude": None,
+                        "installation_date": "2024-01-12",
+                        "last_state": {
+                            "mode": 1,
+                            "switch": "on",
+                            "temp_set": 60,
+                            "temp_current": 60,
+                        },
+                        "heat_pump_installed_by": None,
+                        "created_at": "2024-01-12 12:29:46",
+                        "updated_at": "2024-10-25 21:54:26",
+                        "fault_code": None,
+                        "fault_description": None,
+                        "last_fault_timestamp": None,
+                        "fault_email_codes": None,
+                        "is_online": 1,
+                        "last_disconnect": None,
+                        "is_disconnected_notification_sent": 0,
+                        "signal_strength": "-60db",
+                        "reconnect": 1,
+                        "last_seen": "2025-10-12 14:29:38",
+                        "device_operation_status": 2,
+                        "is_lowtemp_notification_sent": 0,
+                        "lowtemp_notification_timestamp": None,
+                        "low_temp_notification_toggle": True,
+                        "manual_intervention": None,
+                        "manual_intervention_time": None,
+                        "manual_intervention_notification": None,
+                        "upgrade_steps": 0,
+                        "is_qr": 0,
+                        "series_type": "pro",
+                        "set_time_date": "2025-10-12 04:57:16",
+                        "device_type": "heat_pump",
                     }
-                }),
-                "customer_status": None,
-                "installed_by": "self",
-                "brand": "Emerald",
-                "model": "model",
-                "hw_version": "V1.0.0",
-                "soft_version": "V1.0.34",
-                "mac_address": "aabbccddeeff",
-                "wifi_name": "TestWiFi",
-                "ip_address": None,
-                "status": "active",
-                "connection_type": "Bluetooth",
-                "upgradable": 0,
-                "force_update": 0,
-                "available_firmware": "1.0.33",
-                "heat_pump_type": "type-5555-6666-7777-8888",
-                "radius": 200,
-                "latitude": None,
-                "longitude": None,
-                "installation_date": "2024-01-12",
-                "last_state": {
-                    "mode": 1,
-                    "switch": "on",
-                    "temp_set": 60,
-                    "temp_current": 60
-                },
-                "heat_pump_installed_by": None,
-                "created_at": "2024-01-12 12:29:46",
-                "updated_at": "2024-10-25 21:54:26",
-                "fault_code": None,
-                "fault_description": None,
-                "last_fault_timestamp": None,
-                "fault_email_codes": None,
-                "is_online": 1,
-                "last_disconnect": None,
-                "is_disconnected_notification_sent": 0,
-                "signal_strength": "-60db",
-                "reconnect": 1,
-                "last_seen": "2025-10-12 14:29:38",
-                "device_operation_status": 2,
-                "is_lowtemp_notification_sent": 0,
-                "lowtemp_notification_timestamp": None,
-                "low_temp_notification_toggle": True,
-                "manual_intervention": None,
-                "manual_intervention_time": None,
-                "manual_intervention_notification": None,
-                "upgrade_steps": 0,
-                "is_qr": 0,
-                "series_type": "pro",
-                "set_time_date": "2025-10-12 04:57:16",
-                "device_type": "heat_pump"
-            }]
-        }],
+                ],
+            }
+        ],
         "shared_property": [],
         "badge_count": 0,
-        "homepage_slider": []
-    }
+        "homepage_slider": [],
+    },
 }
 
 # Property with heat pump in "shared_property" array
@@ -166,125 +169,129 @@ MOCK_PROPERTY_RESPONSE_SHARED = {
     "message": "Property list",
     "info": {
         "property": [],
-        "shared_property": [{
-            "id": "prop-9999-eeee-8888-ffff",
-            "customer_id": "cust-7777-gggg-6666-hhhh",
-            "property_name": "Shared Home",
-            "house_no": None,
-            "unit_number": None,
-            "street_type": "Avenue",
-            "street": "Test",
-            "city": "Sydney",
-            "unit_type": "House",
-            "level_type": None,
-            "level_number": None,
-            "street_number": "42",
-            "street_suffix": None,
-            "state": "NSW",
-            "postal_code": "2000",
-            "latitude": None,
-            "longitude": None,
-            "address_type": "residential",
-            "premium": "No",
-            "is_structure_deleted": 0,
-            "accessibility": False,
-            "is_structure_updated": 0,
-            "created_at": "2025-08-20 15:34:57",
-            "updated_at": "2025-08-20 15:34:57",
-            "property_type": "Shared",
-            "tariff_structure": [],
-            "member_count": 2,
-            "property_spaces": None,
-            "budget": None,
-            "location": None,
-            "livelinks": [],
-            "safelinks": [],
-            "heat_pump": [{
-                "id": "hws-9999-eeee-8888-ffff",
-                "serial_number": "TEST9876543210",
-                "heat_pump_name": None,
-                "is_solar": None,
-                "is_solar_soaker_on": False,
-                "is_maintenance_required": 0,
-                "property_id": "prop-9999-eeee-8888-ffff",
+        "shared_property": [
+            {
+                "id": "prop-9999-eeee-8888-ffff",
                 "customer_id": "cust-7777-gggg-6666-hhhh",
-                "space_id": None,
-                "installer_id": None,
-                "parent_agency_id": None,
-                "agency_id": None,
-                "agency_name": None,
-                "agent_name": "Installed by customer",
-                "installer_uuid": None,
-                "multi_site_company_id": None,
-                "site_id": None,
-                "consumption_data": json.dumps({
-                    "current_hour": 0,
-                    "last_data_at": "2025-10-12 07:00",
-                    "past_seven_days": {
-                        "2025-10-10": 2.72,
-                        "2025-10-11": 2.29,
-                        "2025-10-12": 0
-                    },
-                    "monthly_consumption": {
-                        "2025-10": 5.01
-                    }
-                }),
-                "customer_status": None,
-                "installed_by": "self",
-                "brand": "Emerald",
-                "model": "model",
-                "hw_version": "V1.0.0",
-                "soft_version": "V1.0.34",
-                "mac_address": "112233445566",
-                "wifi_name": "TestSharedWiFi",
-                "ip_address": None,
-                "status": "active",
-                "connection_type": "Bluetooth",
-                "upgradable": 0,
-                "force_update": 0,
-                "available_firmware": None,
-                "heat_pump_type": "type-aaaa-bbbb-cccc-dddd",
-                "radius": 200,
+                "property_name": "Shared Home",
+                "house_no": None,
+                "unit_number": None,
+                "street_type": "Avenue",
+                "street": "Test",
+                "city": "Sydney",
+                "unit_type": "House",
+                "level_type": None,
+                "level_number": None,
+                "street_number": "42",
+                "street_suffix": None,
+                "state": "NSW",
+                "postal_code": "2000",
                 "latitude": None,
                 "longitude": None,
-                "installation_date": "2025-08-20",
-                "last_state": {
-                    "mode": 1,
-                    "switch": "on",
-                    "temp_set": 60,
-                    "temp_current": 56
-                },
-                "heat_pump_installed_by": None,
-                "created_at": "2025-10-10 08:46:23",
-                "updated_at": "2025-10-10 08:47:16",
-                "fault_code": None,
-                "fault_description": None,
-                "last_fault_timestamp": None,
-                "fault_email_codes": None,
-                "is_online": 1,
-                "last_disconnect": None,
-                "is_disconnected_notification_sent": None,
-                "signal_strength": "-69db",
-                "reconnect": 1,
-                "last_seen": "2025-10-11 19:46:35",
-                "device_operation_status": 2,
-                "is_lowtemp_notification_sent": 0,
-                "lowtemp_notification_timestamp": None,
-                "low_temp_notification_toggle": True,
-                "manual_intervention": None,
-                "manual_intervention_time": None,
-                "manual_intervention_notification": None,
-                "upgrade_steps": 0,
-                "is_qr": 0,
-                "series_type": "pro",
-                "set_time_date": "2025-10-11 19:06:41",
-                "device_type": "heat_pump"
-            }],
-            "devices": []
-        }],
+                "address_type": "residential",
+                "premium": "No",
+                "is_structure_deleted": 0,
+                "accessibility": False,
+                "is_structure_updated": 0,
+                "created_at": "2025-08-20 15:34:57",
+                "updated_at": "2025-08-20 15:34:57",
+                "property_type": "Shared",
+                "tariff_structure": [],
+                "member_count": 2,
+                "property_spaces": None,
+                "budget": None,
+                "location": None,
+                "livelinks": [],
+                "safelinks": [],
+                "heat_pump": [
+                    {
+                        "id": "hws-9999-eeee-8888-ffff",
+                        "serial_number": "TEST9876543210",
+                        "heat_pump_name": None,
+                        "is_solar": None,
+                        "is_solar_soaker_on": False,
+                        "is_maintenance_required": 0,
+                        "property_id": "prop-9999-eeee-8888-ffff",
+                        "customer_id": "cust-7777-gggg-6666-hhhh",
+                        "space_id": None,
+                        "installer_id": None,
+                        "parent_agency_id": None,
+                        "agency_id": None,
+                        "agency_name": None,
+                        "agent_name": "Installed by customer",
+                        "installer_uuid": None,
+                        "multi_site_company_id": None,
+                        "site_id": None,
+                        "consumption_data": json.dumps(
+                            {
+                                "current_hour": 0,
+                                "last_data_at": "2025-10-12 07:00",
+                                "past_seven_days": {
+                                    "2025-10-10": 2.72,
+                                    "2025-10-11": 2.29,
+                                    "2025-10-12": 0,
+                                },
+                                "monthly_consumption": {"2025-10": 5.01},
+                            }
+                        ),
+                        "customer_status": None,
+                        "installed_by": "self",
+                        "brand": "Emerald",
+                        "model": "model",
+                        "hw_version": "V1.0.0",
+                        "soft_version": "V1.0.34",
+                        "mac_address": "112233445566",
+                        "wifi_name": "TestSharedWiFi",
+                        "ip_address": None,
+                        "status": "active",
+                        "connection_type": "Bluetooth",
+                        "upgradable": 0,
+                        "force_update": 0,
+                        "available_firmware": None,
+                        "heat_pump_type": "type-aaaa-bbbb-cccc-dddd",
+                        "radius": 200,
+                        "latitude": None,
+                        "longitude": None,
+                        "installation_date": "2025-08-20",
+                        "last_state": {
+                            "mode": 1,
+                            "switch": "on",
+                            "temp_set": 60,
+                            "temp_current": 56,
+                        },
+                        "heat_pump_installed_by": None,
+                        "created_at": "2025-10-10 08:46:23",
+                        "updated_at": "2025-10-10 08:47:16",
+                        "fault_code": None,
+                        "fault_description": None,
+                        "last_fault_timestamp": None,
+                        "fault_email_codes": None,
+                        "is_online": 1,
+                        "last_disconnect": None,
+                        "is_disconnected_notification_sent": None,
+                        "signal_strength": "-69db",
+                        "reconnect": 1,
+                        "last_seen": "2025-10-11 19:46:35",
+                        "device_operation_status": 2,
+                        "is_lowtemp_notification_sent": 0,
+                        "lowtemp_notification_timestamp": None,
+                        "low_temp_notification_toggle": True,
+                        "manual_intervention": None,
+                        "manual_intervention_time": None,
+                        "manual_intervention_notification": None,
+                        "upgrade_steps": 0,
+                        "is_qr": 0,
+                        "series_type": "pro",
+                        "set_time_date": "2025-10-11 19:06:41",
+                        "device_type": "heat_pump",
+                    }
+                ],
+                "devices": [],
+            }
+        ],
         "badge_count": 0,
-        "homepage_slider": []
-    }
+        "homepage_slider": [],
+    },
 }
 
 # Mixed property response (both self and shared)
@@ -295,8 +302,8 @@ MOCK_PROPERTY_RESPONSE_MIXED = {
         "property": MOCK_PROPERTY_RESPONSE_SELF["info"]["property"],
         "shared_property": MOCK_PROPERTY_RESPONSE_SHARED["info"]["shared_property"],
         "badge_count": 0,
-        "homepage_slider": []
-    }
+        "homepage_slider": [],
+    },
 }
 
 # Empty property response
@@ -307,8 +314,8 @@ MOCK_PROPERTY_RESPONSE_EMPTY = {
         "property": [],
         "shared_property": [],
         "badge_count": 0,
-        "homepage_slider": []
-    }
+        "homepage_slider": [],
+    },
 }
 
 # AWS Cognito mock response
@@ -346,6 +353,7 @@ def make_mqtt_update(device_id, property_id, **updates):
         b'[{"msg_id":"...", "namespace":"business", ...}, {"temp_current":59, "switch":1}]'
     """
     import random
+
     msg = [
         {
             "msg_id": f"{random.randint(10000000, 99999999)}",
@@ -353,11 +361,11 @@ def make_mqtt_update(device_id, property_id, **updates):
             "command": "upload_status",
             "direction": "gw2app",
             "property_id": property_id,
-            "device_id": device_id
+            "device_id": device_id,
         },
-        updates
+        updates,
     ]
-    return json.dumps(msg).encode('utf-8')
+    return json.dumps(msg).encode("utf-8")
 
 
 @pytest.fixture
@@ -432,5 +440,31 @@ def mqtt_client_with_properties():
     return {
         "client": client,
         "hws_id": "hws-1111-aaaa-2222-bbbb",
-        "topic": "ep/heat_pump/from_gw/hws-1111-aaaa-2222-bbbb"
+        "topic": "ep/heat_pump/from_gw/hws-1111-aaaa-2222-bbbb",
+    }
+
+
+@pytest.fixture
+def safety_test_client():
+    """Fixture for property access safety tests.
+
+    Provides a pre-configured client with connection flag set and properties
+    loaded from mock data (deep copied for test isolation).
+
+    Returns dict with:
+    - client: Configured EmeraldHWS instance
+    - hws_id: Standard test HWS ID
+    - hws: Direct reference to heat pump dict (for easy modification)
+    """
+    from emerald_hws import EmeraldHWS
+    import copy
+
+    client = EmeraldHWS("test@example.com", "password")
+    client._is_connected = True
+    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
+
+    return {
+        "client": client,
+        "hws_id": "hws-1111-aaaa-2222-bbbb",
+        "hws": client.properties[0]["heat_pump"][0],  # Shortcut for easy access
     }

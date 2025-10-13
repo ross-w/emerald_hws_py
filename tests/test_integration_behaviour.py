@@ -1,6 +1,5 @@
 """Integration tests for end-to-end behavioural flows."""
-import copy
-import json
+
 import pytest
 from unittest.mock import Mock
 from emerald_hws import EmeraldHWS
@@ -15,7 +14,9 @@ from .conftest import (
 )
 
 
-def test_complete_login_to_mqtt_flow(mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker):
+def test_complete_login_to_mqtt_flow(
+    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
+):
     """Test complete user flow: login → get properties → connect MQTT → receive updates."""
     # Setup mocks
     mock_login = Mock()
@@ -53,7 +54,9 @@ def test_complete_login_to_mqtt_flow(mock_requests, mock_boto3, mock_mqtt5_clien
     assert len(callback_calls) == 1
 
 
-def test_control_command_with_mqtt_response(mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker):
+def test_control_command_with_mqtt_response(
+    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
+):
     """Test end-to-end control flow: send command → receive MQTT response → verify state change."""
     # Setup mocks
     mock_login = Mock()
@@ -86,7 +89,9 @@ def test_control_command_with_mqtt_response(mock_requests, mock_boto3, mock_mqtt
     assert client.isOn(hws_id) is False
 
 
-def test_shared_property_integration_flow(mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker):
+def test_shared_property_integration_flow(
+    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
+):
     """Test integration flow with shared_property (customer account scenario)."""
     # Setup mocks for shared property response
 
@@ -118,7 +123,9 @@ def test_shared_property_integration_flow(mock_requests, mock_boto3, mock_mqtt5_
     assert client.isOn(hws_id) is True
 
 
-def test_mixed_properties_integration(mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker):
+def test_mixed_properties_integration(
+    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
+):
     """Test integration with both self and shared properties."""
     from .conftest import MOCK_PROPERTY_RESPONSE_MIXED
 
@@ -159,7 +166,9 @@ def test_mixed_properties_integration(mock_requests, mock_boto3, mock_mqtt5_clie
     assert client.currentMode(shared_hws) == 2
 
 
-def test_state_persistence_through_reconnection(mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker):
+def test_state_persistence_through_reconnection(
+    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
+):
     """Test that state persists during MQTT reconnection."""
     mock_login = Mock()
     mock_login.json.return_value = MOCK_LOGIN_RESPONSE
@@ -183,7 +192,9 @@ def test_state_persistence_through_reconnection(mock_requests, mock_boto3, mock_
     assert initial_temp == 59
 
     # Simulate reconnection (create new MQTT client)
-    old_mqtt_client = mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    old_mqtt_client = (
+        mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    )
     client.reconnectMQTT()
 
     # Verify old client was stopped and new created

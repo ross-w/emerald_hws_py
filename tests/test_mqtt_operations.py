@@ -1,6 +1,6 @@
 """Tests for MQTT operations."""
+
 import pytest
-from unittest.mock import Mock, MagicMock, call
 from emerald_hws import EmeraldHWS
 from .conftest import (
     MOCK_LOGIN_RESPONSE,
@@ -17,8 +17,6 @@ from .conftest import (
 def get_hws(client):
     """Helper to get first heat pump from client properties."""
     return client.properties[0]["heat_pump"][0]
-
-
 
 
 def test_mqtt_message_parsing_temp_update(mqtt_client_with_properties):

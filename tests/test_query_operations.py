@@ -1,6 +1,6 @@
 """Tests for query operations (status checks, energy usage, etc)."""
+
 import copy
-import json
 import pytest
 from unittest.mock import Mock
 from emerald_hws import EmeraldHWS
@@ -11,7 +11,15 @@ from .conftest import (
 )
 
 
-def test_get_full_status(mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mock_connection_event, mocker):
+def test_get_full_status(
+    mock_requests,
+    mock_boto3,
+    mock_mqtt5_client_builder,
+    mock_auth,
+    mock_io,
+    mock_connection_event,
+    mocker,
+):
     """Test retrieving full status of a heat pump."""
     # Setup mocks
     mock_login = Mock()
@@ -42,7 +50,13 @@ def test_get_full_status(mock_requests, mock_boto3, mock_mqtt5_client_builder, m
 
 
 def test_get_full_status_nonexistent_hws(
-    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mock_connection_event, mocker
+    mock_requests,
+    mock_boto3,
+    mock_mqtt5_client_builder,
+    mock_auth,
+    mock_io,
+    mock_connection_event,
+    mocker,
 ):
     """Test retrieving status for non-existent heat pump returns None."""
     # Setup mocks
@@ -245,7 +259,15 @@ def test_get_info_nonexistent_hws():
     assert info is None
 
 
-def test_list_hws(mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mock_connection_event, mocker):
+def test_list_hws(
+    mock_requests,
+    mock_boto3,
+    mock_mqtt5_client_builder,
+    mock_auth,
+    mock_io,
+    mock_connection_event,
+    mocker,
+):
     """Test listing all heat pump IDs."""
     # Setup mocks
     mock_login = Mock()
@@ -271,7 +293,15 @@ def test_list_hws(mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_aut
     assert "hws-1111-aaaa-2222-bbbb" in hws_list
 
 
-def test_list_hws_multiple(mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mock_connection_event, mocker):
+def test_list_hws_multiple(
+    mock_requests,
+    mock_boto3,
+    mock_mqtt5_client_builder,
+    mock_auth,
+    mock_io,
+    mock_connection_event,
+    mocker,
+):
     """Test listing multiple heat pumps from mixed properties."""
     # Setup mocks
     mock_login = Mock()

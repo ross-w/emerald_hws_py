@@ -4,9 +4,10 @@ NOTE: Detailed payload verification is now in test_control_payload_verification.
 These tests focus on basic integration - that control operations can be called
 and result in MQTT publish being invoked.
 """
+
 import json
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 from emerald_hws import EmeraldHWS
 from .conftest import (
     MOCK_LOGIN_RESPONSE,
@@ -14,16 +15,25 @@ from .conftest import (
 )
 
 
-@pytest.mark.parametrize("method_name,method_args", [
-    ("turnOn", []),
-    ("turnOff", []),
-    ("setNormalMode", []),
-    ("setBoostMode", []),
-    ("setQuietMode", []),
-])
+@pytest.mark.parametrize(
+    "method_name,method_args",
+    [
+        ("turnOn", []),
+        ("turnOff", []),
+        ("setNormalMode", []),
+        ("setBoostMode", []),
+        ("setQuietMode", []),
+    ],
+)
 def test_control_operations_trigger_mqtt_publish(
-    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker,
-    method_name, method_args
+    mock_requests,
+    mock_boto3,
+    mock_mqtt5_client_builder,
+    mock_auth,
+    mock_io,
+    mocker,
+    method_name,
+    method_args,
 ):
     """Test that control operations successfully trigger MQTT publish."""
     # Setup mocks
@@ -47,7 +57,9 @@ def test_control_operations_trigger_mqtt_publish(
     method(hws_id, *method_args)
 
     # Verify MQTT publish was called
-    mqtt_client = mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    mqtt_client = (
+        mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    )
     mqtt_client.publish.assert_called_once()
 
 
@@ -79,5 +91,7 @@ def test_control_operation_auto_connects_when_disconnected(
     assert client._is_connected
 
     # Verify MQTT publish was called
-    mqtt_client = mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    mqtt_client = (
+        mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    )
     mqtt_client.publish.assert_called_once()

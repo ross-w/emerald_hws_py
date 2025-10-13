@@ -1,11 +1,14 @@
 """Tests for thread-safe state management."""
+
 import copy
 import pytest
-import threading
-import time
-from unittest.mock import Mock
 from emerald_hws import EmeraldHWS
-from .conftest import MOCK_PROPERTY_RESPONSE_SELF, MQTT_MSG_TEMP_UPDATE, MQTT_MSG_SWITCH_OFF, MQTT_MSG_WORK_STATE_HEATING
+from .conftest import (
+    MOCK_PROPERTY_RESPONSE_SELF,
+    MQTT_MSG_TEMP_UPDATE,
+    MQTT_MSG_SWITCH_OFF,
+    MQTT_MSG_WORK_STATE_HEATING,
+)
 
 
 def test_update_hws_state():
@@ -42,32 +45,56 @@ def test_update_hws_state_invokes_callback():
     assert len(callback_count) == 1
 
 
-
-
 def test_multiple_heat_pumps_state_isolation():
     """Test that state updates are isolated between different heat pumps."""
     from copy import deepcopy
 
     client = EmeraldHWS("test@example.com", "password")
-
     # Create a property with two heat pumps
     property_data = deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"][0])
     hws1 = property_data["heat_pump"][0]
     hws2 = deepcopy(hws1)
     hws2["id"] = "hws-2222-bbbb-3333-cccc"
     property_data["heat_pump"].append(hws2)
-
     client.properties = [property_data]
-
     # Update first HWS
     client.updateHWSState("hws-1111-aaaa-2222-bbbb", "temp_current", 50)
-
     # Update second HWS
     client.updateHWSState("hws-2222-bbbb-3333-cccc", "temp_current", 65)
-
     # Verify states are isolated
     assert client.properties[0]["heat_pump"][0]["last_state"]["temp_current"] == 50
     assert client.properties[0]["heat_pump"][1]["last_state"]["temp_current"] == 65
+
+
+def test_concurrent_heat_pump_state_updates():
+    """Test concurrent state updates to different heat pumps using threads."""
+    import threading
+    from copy import deepcopy
+
+    client = EmeraldHWS("test@example.com", "password")
+    # Create a property with two heat pumps
+    property_data = deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"][0])
+    hws1 = property_data["heat_pump"][0]
+    hws2 = deepcopy(hws1)
+    hws2["id"] = "hws-2222-bbbb-3333-cccc"
+    property_data["heat_pump"].append(hws2)
+    client.properties = [property_data]
+
+    def update_hws1():
+        client.updateHWSState("hws-1111-aaaa-2222-bbbb", "temp_current", 70)
+
+    def update_hws2():
+        client.updateHWSState("hws-2222-bbbb-3333-cccc", "temp_current", 80)
+
+    thread1 = threading.Thread(target=update_hws1)
+    thread2 = threading.Thread(target=update_hws2)
+    thread1.start()
+    thread2.start()
+    thread1.join()
+    thread2.join()
+    # Verify states are isolated and correct after concurrent updates
+    assert client.properties[0]["heat_pump"][0]["last_state"]["temp_current"] == 70
+    assert client.properties[0]["heat_pump"][1]["last_state"]["temp_current"] == 80
 
 
 def test_callback_not_required():
@@ -147,7 +174,9 @@ def test_heating_state_updates_consistency():
     assert client.isHeating(hws_id) is False
 
     # Receive MQTT update - starts heating
-    client.mqttDecodeUpdate(f"ep/heat_pump/from_gw/{hws_id}", MQTT_MSG_WORK_STATE_HEATING)
+    client.mqttDecodeUpdate(
+        f"ep/heat_pump/from_gw/{hws_id}", MQTT_MSG_WORK_STATE_HEATING
+    )
 
     # Verify heating state is consistent
     assert client.isHeating(hws_id) is True
@@ -172,7 +201,9 @@ def test_callback_consistency_across_updates():
     # Multiple MQTT updates
     client.mqttDecodeUpdate(f"ep/heat_pump/from_gw/{hws_id}", MQTT_MSG_TEMP_UPDATE)
     client.mqttDecodeUpdate(f"ep/heat_pump/from_gw/{hws_id}", MQTT_MSG_SWITCH_OFF)
-    client.mqttDecodeUpdate(f"ep/heat_pump/from_gw/{hws_id}", MQTT_MSG_WORK_STATE_HEATING)
+    client.mqttDecodeUpdate(
+        f"ep/heat_pump/from_gw/{hws_id}", MQTT_MSG_WORK_STATE_HEATING
+    )
 
     # Verify callback invoked for each update
     assert len(callback_log) == 3
@@ -182,3 +213,47 @@ def test_callback_consistency_across_updates():
     assert hws["last_state"]["temp_current"] == 59
     assert hws["last_state"]["switch"] == 0
     assert hws["last_state"]["work_state"] == 1
+
+
+def test_replace_callback_functionality():
+    """Test that replaceCallback properly replaces the update callback."""
+    original_calls = []
+    new_calls = []
+
+    def original_callback():
+        original_calls.append("original")
+
+    def new_callback():
+        new_calls.append("new")
+
+    # Start with original callback
+    client = EmeraldHWS(
+        "test@example.com", "password", update_callback=original_callback
+    )
+    client.properties = MOCK_PROPERTY_RESPONSE_SELF["info"]["property"]
+
+    hws_id = "hws-1111-aaaa-2222-bbbb"
+
+    # Trigger state update - original callback should be called
+    client.updateHWSState(hws_id, "temp_current", 50)
+    assert len(original_calls) == 1
+    assert len(new_calls) == 0
+
+    # Replace callback
+    client.replaceCallback(new_callback)
+
+    # Trigger state update - new callback should be called
+    client.updateHWSState(hws_id, "temp_current", 55)
+    assert len(original_calls) == 1  # Should not have changed
+    assert len(new_calls) == 1
+
+    # Verify only new callback continues to be called
+    client.updateHWSState(hws_id, "temp_current", 60)
+    assert len(original_calls) == 1  # Still unchanged
+    assert len(new_calls) == 2
+
+    # Test replacing with None (removing callback)
+    client.replaceCallback(None)
+    client.updateHWSState(hws_id, "temp_current", 65)
+    assert len(original_calls) == 1  # Still unchanged
+    assert len(new_calls) == 2  # Still unchanged

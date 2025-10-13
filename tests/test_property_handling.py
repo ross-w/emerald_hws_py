@@ -1,4 +1,5 @@
 """Tests for property handling functionality."""
+
 import pytest
 from unittest.mock import Mock
 from emerald_hws import EmeraldHWS
@@ -109,8 +110,6 @@ def test_empty_properties_raises_exception(mock_requests):
         client.getAllHWS()
 
     assert "No heat pumps found" in str(exc_info.value)
-
-
 
 
 def test_auto_login_if_no_token(mock_requests):

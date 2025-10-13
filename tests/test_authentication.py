@@ -1,4 +1,5 @@
 """Tests for authentication functionality."""
+
 import pytest
 from unittest.mock import Mock
 from emerald_hws import EmeraldHWS
@@ -43,5 +44,3 @@ def test_failed_login(mock_requests):
 
     assert "Failed to log into Emerald API" in str(exc_info.value)
     assert client.token == ""
-
-
