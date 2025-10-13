@@ -292,6 +292,8 @@ class EmeraldHWS:
             if command == "upload_status":
                 for key in json_payload[1]:
                     self.updateHWSState(hws_id, key, json_payload[1][key])
+            elif command == "update_hour_energy":
+                self._updateEnergyUsage(hws_id, json_payload[1])
 
     def mqttCallback(self, publish_packet_data):
         """Calls decode update for received message"""
@@ -518,6 +520,102 @@ class EmeraldHWS:
                 for heat_pump in heat_pumps:
                     if heat_pump["id"] == id:
                         heat_pump["last_state"][key] = value
+
+        # Call callback AFTER releasing lock to avoid potential deadlocks
+        if self.update_callback is not None:
+            self.update_callback()
+
+    def _updateEnergyUsage(self, id, energy_data):
+        """Updates energy consumption data from MQTT update_hour_energy messages
+        :param id: ID of the HWS
+        :param energy_data: Energy data dictionary from MQTT message
+        """
+        try:
+            # Extract key values from the energy data
+            start_time = energy_data.get("start_time")
+            end_time = energy_data.get("end_time")
+            current_hour_energy = energy_data.get("data", 0)
+
+            if not start_time or not end_time:
+                self.logger.warning(
+                    "emeraldhws: Energy update missing start_time or end_time"
+                )
+                return
+
+            with self._state_lock:
+                for properties in self.properties:
+                    heat_pumps = properties.get("heat_pump", [])
+                    for heat_pump in heat_pumps:
+                        if heat_pump["id"] == id:
+                            # Get existing consumption data or create new structure
+                            consumption_data = heat_pump.get("consumption_data")
+
+                            try:
+                                if consumption_data:
+                                    consumption = json.loads(consumption_data)
+                                else:
+                                    # Initialize consumption data structure if it doesn't exist
+                                    consumption = {
+                                        "current_hour": 0,
+                                        "last_data_at": "",
+                                        "past_seven_days": {},
+                                        "monthly_consumption": {},
+                                    }
+                            except (json.JSONDecodeError, TypeError):
+                                self.logger.warning(
+                                    "emeraldhws: Invalid consumption_data format, initializing new structure"
+                                )
+                                consumption = {
+                                    "current_hour": 0,
+                                    "last_data_at": "",
+                                    "past_seven_days": {},
+                                    "monthly_consumption": {},
+                                }
+
+                            # Update current hour energy usage
+                            consumption["current_hour"] = current_hour_energy
+                            consumption["last_data_at"] = (
+                                start_time  # Use start_time as the timestamp
+                            )
+
+                            # Update past_seven_days with the new energy data
+                            # Extract date from start_time (format: "YYYY-MM-DD HH:MM")
+                            date_key = (
+                                start_time.split(" ")[0]
+                                if " " in start_time
+                                else start_time
+                            )
+                            consumption["past_seven_days"][date_key] = (
+                                current_hour_energy
+                            )
+
+                            # Keep only the last 7 days of data
+                            if len(consumption["past_seven_days"]) > 7:
+                                # Sort by date and keep only the newest 7 entries
+                                sorted_dates = sorted(
+                                    consumption["past_seven_days"].keys()
+                                )
+                                for old_date in sorted_dates[:-7]:
+                                    del consumption["past_seven_days"][old_date]
+
+                            # Update monthly consumption
+                            month_key = date_key[:7]  # "YYYY-MM" format
+                            if month_key not in consumption["monthly_consumption"]:
+                                consumption["monthly_consumption"][month_key] = 0
+                            consumption["monthly_consumption"][month_key] += (
+                                current_hour_energy
+                            )
+
+                            # Save the updated consumption data back to the heat pump
+                            heat_pump["consumption_data"] = json.dumps(consumption)
+
+                            self.logger.debug(
+                                f"emeraldhws: Updated energy usage for {id}: {current_hour_energy} kWh at {start_time}"
+                            )
+                            break
+
+        except Exception as e:
+            self.logger.error(f"emeraldhws: Error updating energy usage for {id}: {e}")
 
         # Call callback AFTER releasing lock to avoid potential deadlocks
         if self.update_callback is not None:

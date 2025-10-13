@@ -8,6 +8,7 @@ from .conftest import (
     MOCK_LOGIN_RESPONSE,
     MOCK_PROPERTY_RESPONSE_SELF,
     MOCK_PROPERTY_RESPONSE_MIXED,
+    MQTT_MSG_ENERGY_UPDATE,
 )
 
 
@@ -326,3 +327,59 @@ def test_list_hws_multiple(
     assert len(hws_list) == 2
     assert "hws-1111-aaaa-2222-bbbb" in hws_list
     assert "hws-9999-eeee-8888-ffff" in hws_list
+
+
+def test_get_hourly_energy_usage_returns_updated_values():
+    """Test that getHourlyEnergyUsage returns updated values after MQTT message processing."""
+    client = EmeraldHWS("test@example.com", "password")
+    client.properties = MOCK_PROPERTY_RESPONSE_SELF["info"]["property"]
+    client._is_connected = True
+
+    hws_id = "hws-1111-aaaa-2222-bbbb"
+
+    # Get initial energy usage
+    initial_result = client.getHourlyEnergyUsage(hws_id)
+    initial_energy, initial_timestamp = initial_result
+
+    # Process MQTT energy update message
+    topic = f"ep/heat_pump/from_gw/{hws_id}"
+    client.mqttDecodeUpdate(topic, MQTT_MSG_ENERGY_UPDATE)
+
+    # Get updated energy usage
+    updated_result = client.getHourlyEnergyUsage(hws_id)
+    updated_energy, updated_timestamp = updated_result
+
+    # Verify values were updated
+    assert updated_energy == 0.68
+    assert updated_timestamp == "2099-12-31 09:00"
+
+    # Verify it's different from initial values
+    assert updated_energy != initial_energy
+    assert updated_timestamp != initial_timestamp
+
+
+def test_get_hourly_energy_usage_with_multiple_updates():
+    """Test that getHourlyEnergyUsage reflects the most recent MQTT update."""
+    client = EmeraldHWS("test@example.com", "password")
+    client.properties = MOCK_PROPERTY_RESPONSE_SELF["info"]["property"]
+    client._is_connected = True
+
+    hws_id = "hws-1111-aaaa-2222-bbbb"
+    topic = f"ep/heat_pump/from_gw/{hws_id}"
+
+    # Process first energy update
+    client.mqttDecodeUpdate(topic, MQTT_MSG_ENERGY_UPDATE)
+    first_result = client.getHourlyEnergyUsage(hws_id)
+    first_energy, first_timestamp = first_result
+
+    # Process second energy update with different values
+    second_energy_msg = b'[{\n\t\t"msg_id":\t"f6150000",\n\t\t"namespace":\t"business",\n\t\t"command":\t"update_hour_energy",\n\t\t"direction":\t"gw2app",\n\t\t"property_id":\t"prop-aaaa-1111-bbbb-2222",\n\t\t"device_id":\t"hws-1111-aaaa-2222-bbbb"\n\t}, {\n\t\t"start_time":\t"2099-12-31 10:00",\n\t\t"end_time":\t"2099-12-31 11:00",\n\t\t"data":\t1.23\n\t}]'
+    client.mqttDecodeUpdate(topic, second_energy_msg)
+    second_result = client.getHourlyEnergyUsage(hws_id)
+    second_energy, second_timestamp = second_result
+
+    # Verify the method returns the most recent values
+    assert second_energy == 1.23
+    assert second_timestamp == "2099-12-31 10:00"
+    assert second_energy != first_energy
+    assert second_timestamp != first_timestamp

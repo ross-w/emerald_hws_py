@@ -334,6 +334,8 @@ MQTT_MSG_WORK_STATE_HEATING = b'[{\n\t\t"msg_id":\t"6e180000",\n\t\t"namespace":
 
 MQTT_MSG_WORK_STATE_IDLE = b'[{\n\t\t"msg_id":\t"6c180000",\n\t\t"namespace":\t"business",\n\t\t"command":\t"upload_status",\n\t\t"direction":\t"gw2app",\n\t\t"property_id":\t"prop-aaaa-1111-bbbb-2222",\n\t\t"device_id":\t"hws-1111-aaaa-2222-bbbb"\n\t}, {\n\t\t"work_state":\t0\n\t}]'
 
+MQTT_MSG_ENERGY_UPDATE = b'[{\n\t\t"msg_id":\t"f6140000",\n\t\t"namespace":\t"business",\n\t\t"command":\t"update_hour_energy",\n\t\t"direction":\t"gw2app",\n\t\t"property_id":\t"prop-aaaa-1111-bbbb-2222",\n\t\t"device_id":\t"hws-1111-aaaa-2222-bbbb"\n\t}, {\n\t\t"start_time":\t"2099-12-31 09:00",\n\t\t"end_time":\t"2099-12-31 10:00",\n\t\t"data":\t0.68,\n\t\t"temp_current_12":\t42,\n\t\t"temp_current_11":\t41,\n\t\t"temp_current_10":\t40,\n\t\t"temp_current_9":\t40,\n\t\t"temp_current_8":\t39,\n\t\t"temp_current_7":\t38,\n\t\t"temp_current_6":\t37,\n\t\t"temp_current_5":\t36,\n\t\t"temp_current_4":\t35,\n\t\t"temp_current_3":\t35,\n\t\t"temp_current_2":\t34,\n\t\t"temp_current_1":\t33,\n\t\t"power_consumption_6":\t0.10999999940395355,\n\t\t"power_consumption_5":\t0.119999997317791,\n\t\t"power_consumption_4":\t0.119999997317791,\n\t\t"power_consumption_3":\t0.10999999940395355,\n\t\t"power_consumption_2":\t0.10000000149011612,\n\t\t"power_consumption_1":\t0.119999997317791\n\t}]'
+
 MQTT_MSG_CONTROL_RESPONSE_OK = b'[{\n\t\t"msg_id":\t"121",\n\t\t"namespace":\t"business",\n\t\t"command":\t"control",\n\t\t"direction":\t"gw2app",\n\t\t"property_id":\t"prop-aaaa-1111-bbbb-2222",\n\t\t"device_id":\t"hws-1111-aaaa-2222-bbbb"\n\t}, {\n\t\t"result":\t"ok",\n\t\t"switch":\t0\n\t}]'
 
 
