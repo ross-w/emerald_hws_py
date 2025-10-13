@@ -67,5 +67,4 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 # Ignore specific rules
 ignore = [
     "E501",  # Line too long (handled by formatter)
-    "F401",  # Unused imports (some imports are used in commented code)
 ]

@@ -1,9 +1,9 @@
 import json
 import logging
-import os
 import random
 import threading
 import time
+from datetime import datetime
 
 import boto3
 import requests
@@ -530,95 +530,52 @@ class EmeraldHWS:
         :param id: ID of the HWS
         :param energy_data: Energy data dictionary from MQTT message
         """
-        try:
-            # Extract key values from the energy data
-            start_time = energy_data.get("start_time")
-            end_time = energy_data.get("end_time")
-            current_hour_energy = energy_data.get("data", 0)
+        start_time = energy_data["start_time"]
+        current_hour_energy = energy_data["data"]
+        date_key = start_time.split(" ")[0]  # Extract date part
+        month_key = date_key[:7]  # Extract month part
 
-            if not start_time or not end_time:
-                self.logger.warning(
-                    "emeraldhws: Energy update missing start_time or end_time"
-                )
-                return
+        with self._state_lock:
+            for properties in self.properties:
+                for heat_pump in properties["heat_pump"]:
+                    if heat_pump["id"] == id:
+                        # Get or create consumption data
+                        consumption = (
+                            json.loads(heat_pump["consumption_data"])
+                            if heat_pump.get("consumption_data")
+                            else {
+                                "current_hour": 0,
+                                "last_data_at": "",
+                                "past_seven_days": {},
+                                "monthly_consumption": {},
+                            }
+                        )
 
-            with self._state_lock:
-                for properties in self.properties:
-                    heat_pumps = properties.get("heat_pump", [])
-                    for heat_pump in heat_pumps:
-                        if heat_pump["id"] == id:
-                            # Get existing consumption data or create new structure
-                            consumption_data = heat_pump.get("consumption_data")
+                        # Update current hour and timestamp
+                        consumption["current_hour"] = current_hour_energy
+                        consumption["last_data_at"] = start_time
+                        consumption["past_seven_days"][date_key] = (
+                            consumption["past_seven_days"].get(date_key, 0)
+                            + current_hour_energy
+                        )
 
-                            try:
-                                if consumption_data:
-                                    consumption = json.loads(consumption_data)
-                                else:
-                                    # Initialize consumption data structure if it doesn't exist
-                                    consumption = {
-                                        "current_hour": 0,
-                                        "last_data_at": "",
-                                        "past_seven_days": {},
-                                        "monthly_consumption": {},
-                                    }
-                            except (json.JSONDecodeError, TypeError):
-                                self.logger.warning(
-                                    "emeraldhws: Invalid consumption_data format, initializing new structure"
-                                )
-                                consumption = {
-                                    "current_hour": 0,
-                                    "last_data_at": "",
-                                    "past_seven_days": {},
-                                    "monthly_consumption": {},
-                                }
+                        # Keep only last 7 days
+                        if len(consumption["past_seven_days"]) > 7:
+                            sorted_dates = sorted(consumption["past_seven_days"])
+                            for old_date in sorted_dates[:-7]:
+                                del consumption["past_seven_days"][old_date]
 
-                            # Update current hour energy usage
-                            consumption["current_hour"] = current_hour_energy
-                            consumption["last_data_at"] = (
-                                start_time  # Use start_time as the timestamp
-                            )
+                        # Update monthly consumption
+                        consumption["monthly_consumption"][month_key] = (
+                            consumption["monthly_consumption"].get(month_key, 0)
+                            + current_hour_energy
+                        )
 
-                            # Update past_seven_days with the new energy data
-                            # Extract date from start_time (format: "YYYY-MM-DD HH:MM")
-                            date_key = (
-                                start_time.split(" ")[0]
-                                if " " in start_time
-                                else start_time
-                            )
-                            consumption["past_seven_days"][date_key] = (
-                                current_hour_energy
-                            )
+                        # Save back to heat pump
+                        heat_pump["consumption_data"] = json.dumps(consumption)
+                        break
 
-                            # Keep only the last 7 days of data
-                            if len(consumption["past_seven_days"]) > 7:
-                                # Sort by date and keep only the newest 7 entries
-                                sorted_dates = sorted(
-                                    consumption["past_seven_days"].keys()
-                                )
-                                for old_date in sorted_dates[:-7]:
-                                    del consumption["past_seven_days"][old_date]
-
-                            # Update monthly consumption
-                            month_key = date_key[:7]  # "YYYY-MM" format
-                            if month_key not in consumption["monthly_consumption"]:
-                                consumption["monthly_consumption"][month_key] = 0
-                            consumption["monthly_consumption"][month_key] += (
-                                current_hour_energy
-                            )
-
-                            # Save the updated consumption data back to the heat pump
-                            heat_pump["consumption_data"] = json.dumps(consumption)
-
-                            self.logger.debug(
-                                f"emeraldhws: Updated energy usage for {id}: {current_hour_energy} kWh at {start_time}"
-                            )
-                            break
-
-        except Exception as e:
-            self.logger.error(f"emeraldhws: Error updating energy usage for {id}: {e}")
-
-        # Call callback AFTER releasing lock to avoid potential deadlocks
-        if self.update_callback is not None:
+        if self.update_callback:
             self.update_callback()
 
     def subscribeForUpdates(self, id):
@@ -771,25 +728,61 @@ class EmeraldHWS:
         return False
 
     def getHourlyEnergyUsage(self, id):
-        """Returns energy usage as reported by heater for the previous hour in kWh and a string of format YYYY-MM-DD HH:00 dictating the starting hour for the energy reading
+        """Returns energy usage as reported by heater for the previous hour in kWh
         :param id: The UUID of the HWS to query
         """
         full_status = self.getFullStatus(id)
         if not full_status:
             return None
 
-        consumption = full_status.get("consumption_data")
-        if consumption:
-            consumption = json.loads(consumption)
-        else:
+        consumption = json.loads(full_status.get("consumption_data", "{}"))
+        return consumption.get("current_hour")
+
+    def getDailyEnergyUsage(self, id):
+        """Returns today's cumulative energy usage in kWh if available, otherwise None
+        :param id: The UUID of the HWS to query
+        :returns: Today's energy usage or None if no data received for current day yet
+        """
+        full_status = self.getFullStatus(id)
+        if not full_status:
             return None
 
-        current_hour = consumption.get("current_hour")
-        last_data_at = consumption.get("last_data_at")
-        if current_hour is None or last_data_at is None:
+        consumption = json.loads(full_status.get("consumption_data", "{}"))
+        today = datetime.now().strftime("%Y-%m-%d")
+        return consumption.get("past_seven_days", {}).get(today)
+
+    def getWeeklyEnergyUsage(self, id):
+        """Returns total cumulative energy usage for the past 7 days in kWh
+        :param id: The UUID of the HWS to query
+        """
+        full_status = self.getFullStatus(id)
+        if not full_status:
             return None
 
-        return current_hour, last_data_at
+        consumption = json.loads(full_status.get("consumption_data", "{}"))
+        return sum(consumption.get("past_seven_days", {}).values())
+
+    def getMonthlyEnergyUsage(self, id):
+        """Returns current month's cumulative energy usage in kWh if available, otherwise None
+        :param id: The UUID of the HWS to query
+        """
+        full_status = self.getFullStatus(id)
+        if not full_status:
+            return None
+
+        consumption = json.loads(full_status.get("consumption_data", "{}"))
+        current_month = datetime.now().strftime("%Y-%m")
+        return consumption.get("monthly_consumption", {}).get(current_month)
+
+    def getHistoricalConsumption(self, id):
+        """Returns the full consumption data structure or None if unavailable
+        :param id: The UUID of the HWS to query
+        """
+        full_status = self.getFullStatus(id)
+        if not full_status:
+            return None
+
+        return json.loads(full_status.get("consumption_data", "{}"))
 
     def currentMode(self, id):
         """Returns an integer specifying the current mode (0==boost, 1==normal, 2==quiet)

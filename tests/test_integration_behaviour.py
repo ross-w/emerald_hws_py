@@ -1,6 +1,5 @@
 """Integration tests for end-to-end behavioural flows."""
 
-import pytest
 from unittest.mock import Mock
 from emerald_hws import EmeraldHWS
 from .conftest import (
@@ -10,7 +9,6 @@ from .conftest import (
     MQTT_MSG_TEMP_UPDATE,
     MQTT_MSG_SWITCH_OFF,
     MQTT_MSG_SWITCH_ON,
-    MQTT_MSG_WORK_STATE_HEATING,
 )
 
 

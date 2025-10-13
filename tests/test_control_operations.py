@@ -5,7 +5,6 @@ These tests focus on basic integration - that control operations can be called
 and result in MQTT publish being invoked.
 """
 
-import json
 import pytest
 from unittest.mock import Mock
 from emerald_hws import EmeraldHWS

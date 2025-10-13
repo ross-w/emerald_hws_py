@@ -1,13 +1,11 @@
 """Tests for reconnection behaviour and state persistence."""
 
 import copy
-import pytest
 from unittest.mock import Mock
 from emerald_hws import EmeraldHWS
 from .conftest import (
     MOCK_LOGIN_RESPONSE,
     MOCK_PROPERTY_RESPONSE_SELF,
-    MQTT_MSG_TEMP_UPDATE,
 )
 
 

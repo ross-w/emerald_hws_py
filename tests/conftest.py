@@ -430,43 +430,19 @@ def mqtt_client_with_properties():
     """Fixture providing a client with properties pre-configured for MQTT tests.
 
     Returns a dict with:
-    - client: EmeraldHWS instance with properties set
+    - client: EmeraldHWS instance with properties set and connected flag
     - hws_id: Standard HWS ID for testing
     - topic: Standard MQTT topic for testing
-    """
-    from emerald_hws import EmeraldHWS
-
-    client = EmeraldHWS("test@example.com", "password")
-    client.properties = MOCK_PROPERTY_RESPONSE_SELF["info"]["property"]
-
-    return {
-        "client": client,
-        "hws_id": "hws-1111-aaaa-2222-bbbb",
-        "topic": "ep/heat_pump/from_gw/hws-1111-aaaa-2222-bbbb",
-    }
-
-
-@pytest.fixture
-def safety_test_client():
-    """Fixture for property access safety tests.
-
-    Provides a pre-configured client with connection flag set and properties
-    loaded from mock data (deep copied for test isolation).
-
-    Returns dict with:
-    - client: Configured EmeraldHWS instance
-    - hws_id: Standard test HWS ID
-    - hws: Direct reference to heat pump dict (for easy modification)
     """
     from emerald_hws import EmeraldHWS
     import copy
 
     client = EmeraldHWS("test@example.com", "password")
-    client._is_connected = True
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
+    client._is_connected = True  # Set connected flag to bypass connection checks
 
     return {
         "client": client,
         "hws_id": "hws-1111-aaaa-2222-bbbb",
-        "hws": client.properties[0]["heat_pump"][0],  # Shortcut for easy access
+        "topic": "ep/heat_pump/from_gw/hws-1111-aaaa-2222-bbbb",
     }

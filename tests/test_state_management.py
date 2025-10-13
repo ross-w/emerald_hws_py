@@ -1,7 +1,6 @@
 """Tests for thread-safe state management."""
 
 import copy
-import pytest
 from emerald_hws import EmeraldHWS
 from .conftest import (
     MOCK_PROPERTY_RESPONSE_SELF,
@@ -24,6 +23,137 @@ def test_update_hws_state():
     # Verify state was updated
     hws = client.properties[0]["heat_pump"][0]
     assert hws["last_state"]["temp_current"] == 55
+
+
+def test_concurrent_energy_method_access():
+    """Test that energy methods are thread-safe during concurrent access."""
+    import threading
+
+    client = EmeraldHWS("test@example.com", "password")
+    client.properties = MOCK_PROPERTY_RESPONSE_SELF["info"]["property"]
+    client._is_connected = True
+
+    hws_id = "hws-1111-aaaa-2222-bbbb"
+
+    results = {"daily": [], "weekly": [], "monthly": [], "historical": []}
+    errors = []
+
+    def read_daily_energy():
+        try:
+            for _ in range(10):
+                result = client.getDailyEnergyUsage(hws_id)
+                results["daily"].append(result)
+        except Exception as e:
+            errors.append(f"daily: {e}")
+
+    def read_weekly_energy():
+        try:
+            for _ in range(10):
+                result = client.getWeeklyEnergyUsage(hws_id)
+                results["weekly"].append(result)
+        except Exception as e:
+            errors.append(f"weekly: {e}")
+
+    def read_monthly_energy():
+        try:
+            for _ in range(10):
+                result = client.getMonthlyEnergyUsage(hws_id)
+                results["monthly"].append(result)
+        except Exception as e:
+            errors.append(f"monthly: {e}")
+
+    def read_historical_consumption():
+        try:
+            for _ in range(10):
+                result = client.getHistoricalConsumption(hws_id)
+                results["historical"].append(result)
+        except Exception as e:
+            errors.append(f"historical: {e}")
+
+    # Start concurrent read operations
+    threads = [
+        threading.Thread(target=read_daily_energy),
+        threading.Thread(target=read_weekly_energy),
+        threading.Thread(target=read_monthly_energy),
+        threading.Thread(target=read_historical_consumption),
+    ]
+
+    for thread in threads:
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    # Verify no errors occurred
+    assert len(errors) == 0, f"Thread safety errors: {errors}"
+
+    # Verify all methods returned consistent results
+    assert len(results["daily"]) == 10
+    assert len(results["weekly"]) == 10
+    assert len(results["monthly"]) == 10
+    assert len(results["historical"]) == 10
+
+    # Verify results are consistent (all calls should return same data)
+    assert all(r == results["daily"][0] for r in results["daily"])
+    assert all(r == results["weekly"][0] for r in results["weekly"])
+    assert all(r == results["monthly"][0] for r in results["monthly"])
+    assert all(r == results["historical"][0] for r in results["historical"])
+
+
+def test_concurrent_energy_updates_and_reads():
+    """Test thread safety when updating consumption data while reading."""
+    import threading
+
+    client = EmeraldHWS("test@example.com", "password")
+    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
+    client._is_connected = True
+
+    hws_id = "hws-1111-aaaa-2222-bbbb"
+    topic = f"ep/heat_pump/from_gw/{hws_id}"
+
+    read_results = []
+    errors = []
+
+    def continuous_reads():
+        try:
+            for _ in range(20):
+                daily = client.getDailyEnergyUsage(hws_id)
+                weekly = client.getWeeklyEnergyUsage(hws_id)
+                monthly = client.getMonthlyEnergyUsage(hws_id)
+                historical = client.getHistoricalConsumption(hws_id)
+                read_results.append((daily, weekly, monthly, historical))
+        except Exception as e:
+            errors.append(f"read_error: {e}")
+
+    def energy_updates():
+        try:
+            # Process multiple energy updates with consistent dates
+            for i in range(5):
+                energy_msg = f'[{{"msg_id": "msg{i}", "namespace": "business", "command": "update_hour_energy", "direction": "gw2app", "property_id": "prop-aaaa-1111-bbbb-2222", "device_id": "{hws_id}"}}, {{"start_time": "2099-12-31 {i:02d}:00", "end_time": "2099-12-31 {i + 1:02d}:00", "data": {0.5 + i * 0.1}}}]'
+                client.mqttDecodeUpdate(topic, energy_msg.encode())
+        except Exception as e:
+            errors.append(f"update_error: {e}")
+
+    # Start concurrent operations
+    read_thread = threading.Thread(target=continuous_reads)
+    update_thread = threading.Thread(target=energy_updates)
+
+    read_thread.start()
+    update_thread.start()
+
+    read_thread.join()
+    update_thread.join()
+
+    # Verify no errors occurred
+    assert len(errors) == 0, f"Concurrent access errors: {errors}"
+
+    # Verify reads were successful
+    assert len(read_results) > 0
+
+    # Verify final state is consistent
+    final_historical = client.getHistoricalConsumption(hws_id)
+    assert final_historical is not None
+    assert "past_seven_days" in final_historical
 
 
 def test_update_hws_state_invokes_callback():
