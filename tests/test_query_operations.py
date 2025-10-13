@@ -153,8 +153,7 @@ def test_is_heating_fallback_to_device_operation_status():
     client._is_connected = True
 
     # Remove work_state to test fallback
-    if "work_state" in client.properties[0]["heat_pump"][0]["last_state"]:
-        del client.properties[0]["heat_pump"][0]["last_state"]["work_state"]
+    client.properties[0]["heat_pump"][0]["last_state"].pop("work_state", None)
 
     # Set device_operation_status to 1 (heating)
     client.properties[0]["heat_pump"][0]["device_operation_status"] = 1
@@ -297,5 +296,3 @@ def test_list_hws_multiple(mock_requests, mock_boto3, mock_mqtt5_client_builder,
     assert len(hws_list) == 2
     assert "hws-1111-aaaa-2222-bbbb" in hws_list
     assert "hws-9999-eeee-8888-ffff" in hws_list
-
-

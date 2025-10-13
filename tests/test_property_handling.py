@@ -84,10 +84,7 @@ def test_get_properties_mixed(mock_requests):
     assert "Shared" in property_types
 
     # Verify all heat pumps are accessible
-    all_hws_ids = []
-    for prop in client.properties:
-        for hws in prop["heat_pump"]:
-            all_hws_ids.append(hws["id"])
+    all_hws_ids = [hws["id"] for prop in client.properties for hws in prop["heat_pump"]]
 
     assert "hws-1111-aaaa-2222-bbbb" in all_hws_ids
     assert "hws-9999-eeee-8888-ffff" in all_hws_ids

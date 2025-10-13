@@ -86,8 +86,7 @@ def test_is_heating_handles_missing_work_state():
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
     # Remove work_state to test fallback
-    if "work_state" in client.properties[0]["heat_pump"][0]["last_state"]:
-        del client.properties[0]["heat_pump"][0]["last_state"]["work_state"]
+    client.properties[0]["heat_pump"][0]["last_state"].pop("work_state", None)
 
     # Set device_operation_status to heating
     client.properties[0]["heat_pump"][0]["device_operation_status"] = 1
@@ -107,11 +106,10 @@ def test_is_heating_handles_no_status_fields():
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
     # Remove work_state
-    if "work_state" in client.properties[0]["heat_pump"][0]["last_state"]:
-        del client.properties[0]["heat_pump"][0]["last_state"]["work_state"]
+    client.properties[0]["heat_pump"][0]["last_state"].pop("work_state", None)
 
     # Remove device_operation_status
-    del client.properties[0]["heat_pump"][0]["device_operation_status"]
+    client.properties[0]["heat_pump"][0].pop("device_operation_status", None)
 
     # Should return False, not crash
     assert client.isHeating(hws_id) is False
@@ -232,25 +230,31 @@ def test_update_hws_state_handles_nonexistent_device():
     assert hws["last_state"]["temp_current"] == original_temp
 
 
-def test_type_coercion_edge_cases():
-    """Test edge cases in type coercion for switch values."""
+@pytest.mark.parametrize("switch_value,expected", [
+    (1, True),     # Numeric 1 should be on
+    ("on", True),  # String "on" should be on
+    (True, True),  # Boolean True == 1 in Python, so it matches
+])
+def test_switch_truthy_values_handled_correctly(switch_value, expected):
+    """Test that truthy switch values are handled correctly."""
     client = EmeraldHWS("test@example.com", "password")
     client._is_connected = True
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
-    # Test various "truthy" values
-    for value in [1, "on", True]:
-        client.properties[0]["heat_pump"][0]["last_state"]["switch"] = value
-        # Only 1 and "on" should be considered on
-        if value in (1, "on"):
-            assert client.isOn(hws_id) is True, f"Expected {value} to be True"
-        else:
-            # True (boolean) is not explicitly handled, so it won't match
-            assert client.isOn(hws_id) is False, f"Expected {value} to be False"
+    client.properties[0]["heat_pump"][0]["last_state"]["switch"] = switch_value
+    assert client.isOn(hws_id) is expected
 
-    # Test various "falsy" values
-    for value in [0, "off", False, None]:
-        client.properties[0]["heat_pump"][0]["last_state"]["switch"] = value
-        assert client.isOn(hws_id) is False, f"Expected {value} to be False"
+
+@pytest.mark.parametrize("switch_value", [0, "off", False, None])
+def test_switch_falsy_values_handled_correctly(switch_value):
+    """Test that falsy switch values are correctly treated as off."""
+    client = EmeraldHWS("test@example.com", "password")
+    client._is_connected = True
+    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
+
+    hws_id = "hws-1111-aaaa-2222-bbbb"
+
+    client.properties[0]["heat_pump"][0]["last_state"]["switch"] = switch_value
+    assert client.isOn(hws_id) is False

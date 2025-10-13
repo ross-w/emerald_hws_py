@@ -413,3 +413,24 @@ def mock_auth(mocker):
 def mock_io(mocker):
     """Mock AWS IO TLS context."""
     return mocker.patch("emerald_hws.emeraldhws.io")
+
+
+@pytest.fixture
+def mqtt_client_with_properties():
+    """Fixture providing a client with properties pre-configured for MQTT tests.
+
+    Returns a dict with:
+    - client: EmeraldHWS instance with properties set
+    - hws_id: Standard HWS ID for testing
+    - topic: Standard MQTT topic for testing
+    """
+    from emerald_hws import EmeraldHWS
+
+    client = EmeraldHWS("test@example.com", "password")
+    client.properties = MOCK_PROPERTY_RESPONSE_SELF["info"]["property"]
+
+    return {
+        "client": client,
+        "hws_id": "hws-1111-aaaa-2222-bbbb",
+        "topic": "ep/heat_pump/from_gw/hws-1111-aaaa-2222-bbbb"
+    }

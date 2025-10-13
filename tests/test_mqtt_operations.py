@@ -14,62 +14,51 @@ from .conftest import (
 )
 
 
+def get_hws(client):
+    """Helper to get first heat pump from client properties."""
+    return client.properties[0]["heat_pump"][0]
 
 
-def test_mqtt_message_parsing_temp_update():
+
+
+def test_mqtt_message_parsing_temp_update(mqtt_client_with_properties):
     """Test parsing of temperature update MQTT message."""
-    client = EmeraldHWS("test@example.com", "password")
-
-    # Setup initial state
-    client.properties = MOCK_PROPERTY_RESPONSE_SELF["info"]["property"]
+    client = mqtt_client_with_properties["client"]
+    topic = mqtt_client_with_properties["topic"]
 
     # Decode the message
-    topic = "ep/heat_pump/from_gw/hws-1111-aaaa-2222-bbbb"
     client.mqttDecodeUpdate(topic, MQTT_MSG_TEMP_UPDATE)
 
     # Verify state was updated
-    hws = client.properties[0]["heat_pump"][0]
-    assert hws["last_state"]["temp_current"] == 59
+    assert get_hws(client)["last_state"]["temp_current"] == 59
 
 
-def test_mqtt_message_parsing_switch_state():
+def test_mqtt_message_parsing_switch_state(mqtt_client_with_properties):
     """Test parsing of switch state MQTT messages."""
-    client = EmeraldHWS("test@example.com", "password")
-
-    # Setup initial state
-    client.properties = MOCK_PROPERTY_RESPONSE_SELF["info"]["property"]
-
-    topic = "ep/heat_pump/from_gw/hws-1111-aaaa-2222-bbbb"
+    client = mqtt_client_with_properties["client"]
+    topic = mqtt_client_with_properties["topic"]
 
     # Test switch off
     client.mqttDecodeUpdate(topic, MQTT_MSG_SWITCH_OFF)
-    hws = client.properties[0]["heat_pump"][0]
-    assert hws["last_state"]["switch"] == 0
+    assert get_hws(client)["last_state"]["switch"] == 0
 
     # Test switch on
     client.mqttDecodeUpdate(topic, MQTT_MSG_SWITCH_ON)
-    hws = client.properties[0]["heat_pump"][0]
-    assert hws["last_state"]["switch"] == 1
+    assert get_hws(client)["last_state"]["switch"] == 1
 
 
-def test_mqtt_message_parsing_work_state():
+def test_mqtt_message_parsing_work_state(mqtt_client_with_properties):
     """Test parsing of work_state MQTT messages."""
-    client = EmeraldHWS("test@example.com", "password")
-
-    # Setup initial state
-    client.properties = MOCK_PROPERTY_RESPONSE_SELF["info"]["property"]
-
-    topic = "ep/heat_pump/from_gw/hws-1111-aaaa-2222-bbbb"
+    client = mqtt_client_with_properties["client"]
+    topic = mqtt_client_with_properties["topic"]
 
     # Test work_state heating
     client.mqttDecodeUpdate(topic, MQTT_MSG_WORK_STATE_HEATING)
-    hws = client.properties[0]["heat_pump"][0]
-    assert hws["last_state"]["work_state"] == 1
+    assert get_hws(client)["last_state"]["work_state"] == 1
 
     # Test work_state idle
     client.mqttDecodeUpdate(topic, MQTT_MSG_WORK_STATE_IDLE)
-    hws = client.properties[0]["heat_pump"][0]
-    assert hws["last_state"]["work_state"] == 0
+    assert get_hws(client)["last_state"]["work_state"] == 0
 
 
 def test_mqtt_callback_invoked_on_message():
