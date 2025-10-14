@@ -57,7 +57,7 @@ class EmeraldHWS:
             threading.RLock()
         )  # Lock to protect MQTT client lifecycle operations
         self._is_connected = False  # Flag to track connection state
-        self.mqttClient = None  # Initialize to None
+        self.mqttClient = None  # Initialise to None
 
         # Convert minutes to seconds for internal use
         self.connection_timeout = connection_timeout_minutes * 60.0
@@ -721,7 +721,7 @@ class EmeraldHWS:
                 return work_state == 1
 
             # Fallback to device_operation_status if work_state not available yet
-            # (e.g., before first MQTT update after initialization)
+            # (e.g., before first MQTT update after initialisation)
             heating_status = full_status.get("device_operation_status")
             return heating_status == 1
 

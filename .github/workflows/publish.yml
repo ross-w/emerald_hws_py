@@ -54,6 +54,10 @@ jobs:
     needs: security-check
     if: needs.security-check.outputs.is-authorized == 'true'
     uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
 
   smoke-test:
     name: "Smoke Test"
