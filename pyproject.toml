@@ -22,7 +22,8 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff>=0.12.0,<1.0.0"
+    "ruff>=0.12.0,<1.0.0",
+    "pre-commit>=3.0.0"
 ]
 test = [
     "pytest>=7.0.0",
