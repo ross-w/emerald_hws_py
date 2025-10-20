@@ -70,7 +70,7 @@ jobs:
 
       - name: Publish test results
         # EnricoMi/publish-unit-test-result-action@v2.18.0
-        uses: EnricoMi/publish-unit-test-result-action@170bf24d20d201b842d7a52403b73ed297e6645b
+        uses: EnricoMi/publish-unit-test-result-action@3a74b2957438d0b6e2e61d67b05318aa25c9e6c6
         if: always() && matrix.python-version == '3.11'
         with:
           files: junit.xml
