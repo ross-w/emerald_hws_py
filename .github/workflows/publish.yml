@@ -74,13 +74,15 @@ jobs:
 
     steps:
       - name: "Checkout repository"
-        uses: "actions/checkout@v5"
+        # actions/checkout@v5
+        uses: "actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd"
         with:
           # Fetch full history for setuptools-scm version detection
           fetch-depth: 0
 
       - name: "Set up Python"
-        uses: "actions/setup-python@v6"
+        # actions/setup-python@v6
+        uses: "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405"
         with:
           python-version: "3.11"
           cache: "pip"
@@ -119,12 +121,14 @@ jobs:
 
     steps:
       - name: "Checkout repository"
-        uses: "actions/checkout@v5"
+        # actions/checkout@v5
+        uses: "actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd"
         with:
           fetch-depth: 0
 
       - name: "Set up Python"
-        uses: "actions/setup-python@v6"
+        # actions/setup-python@v6
+        uses: "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405"
         with:
           python-version: "3.11"
           cache: "pip"
@@ -161,7 +165,8 @@ jobs:
           "
 
       - name: "Upload build artifacts"
-        uses: actions/upload-artifact@v6
+        # actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: dist-packages
           path: dist/
@@ -188,7 +193,8 @@ jobs:
 
     steps:
       - name: "Download build artifacts"
-        uses: actions/download-artifact@v7
+        # actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: dist-packages
           path: dist/
