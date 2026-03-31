@@ -49,7 +49,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         # codecov/codecov-action@v5.0.7
-        uses: codecov/codecov-action@0e912eeae3b794adb9dade1760874f08f7dfbabe
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7
         if: matrix.python-version == '3.11'
         with:
           files: ./coverage.xml
@@ -58,7 +58,7 @@ jobs:
           fail_ci_if_error: false
 
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         if: always()
         with:
           name: test-results-${{ matrix.python-version }}
@@ -70,7 +70,7 @@ jobs:
 
       - name: Publish test results
         # EnricoMi/publish-unit-test-result-action@v2.18.0
-        uses: EnricoMi/publish-unit-test-result-action@170bf24d20d201b842d7a52403b73ed297e6645b
+        uses: EnricoMi/publish-unit-test-result-action@27d65e188ec43221b20d26de30f4892fad91df2f
         if: always() && matrix.python-version == '3.11'
         with:
           files: junit.xml
