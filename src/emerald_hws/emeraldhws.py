@@ -891,7 +891,7 @@ class EmeraldHWS:
             self.health_check_timer.cancel()
             self.health_check_timer = None
 
-        # Stop MQTT client
+        # Stop MQTT client and reset connection state atomically
         with self._mqtt_lock:
             if self.mqttClient is not None:
                 try:
@@ -908,5 +908,5 @@ class EmeraldHWS:
                 finally:
                     self.mqttClient = None
 
-        self._is_connected = False
-        self._connection_event.clear()
+            self._is_connected = False
+            self._connection_event.clear()

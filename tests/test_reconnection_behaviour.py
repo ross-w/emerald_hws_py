@@ -91,8 +91,36 @@ def test_state_refresh_failure_during_reconnection_is_non_fatal(
     # Reconnect should not raise even if getAllHWS fails
     client.reconnectMQTT()
 
-    # MQTT client should still be set up
+    # MQTT client should still be set up and connection healthy
     assert client.mqttClient is not None
+    assert client._is_connected is True
+
+
+def test_state_refresh_exception_during_reconnection_is_non_fatal(
+    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
+):
+    """Test that reconnect survives when getAllHWS raises an exception."""
+    mock_login = Mock()
+    mock_login.json.return_value = MOCK_LOGIN_RESPONSE
+    mock_requests.post.return_value = mock_login
+
+    mock_properties = Mock()
+    mock_properties.json.return_value = MOCK_PROPERTY_RESPONSE_SELF
+    mock_requests.get.return_value = mock_properties
+
+    client = EmeraldHWS("test@example.com", "password")
+    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    client.connect()
+
+    # Make getAllHWS raise an exception on reconnect (simulating network failure)
+    mock_requests.get.side_effect = Exception("Connection timed out")
+
+    # Reconnect should not raise
+    client.reconnectMQTT()
+
+    # MQTT client should still be set up and connection healthy
+    assert client.mqttClient is not None
+    assert client._is_connected is True
 
 
 def test_mqtt_subscriptions_after_reconnection(
@@ -154,8 +182,14 @@ def test_disconnect_stops_mqtt_and_cancels_timers(
     assert client.reconnect_timer is not None
     assert client.health_check_timer is not None
 
+    # Capture MQTT client reference before disconnect clears it
+    mqtt_client = client.mqttClient
+
     # Disconnect
     client.disconnect()
+
+    # Verify stop() was called on the underlying MQTT client
+    mqtt_client.stop.assert_called_once()
 
     # Verify everything is cleaned up
     assert client.mqttClient is None
