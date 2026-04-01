@@ -219,6 +219,17 @@ class EmeraldHWS:
                 f"emeraldhws: awsiot: MQTT reconnection completed (reason: {reason})"
             )
 
+        # Refresh state from API outside the mqtt_lock to avoid holding it during HTTP calls
+        try:
+            self.getAllHWS()
+            self.logger.debug(
+                "emeraldhws: awsiot: State refreshed from API after reconnect"
+            )
+        except Exception as e:
+            self.logger.warning(
+                f"emeraldhws: awsiot: Failed to refresh state during reconnect: {e}"
+            )
+
     def connectMQTT(self):
         """Establishes a connection to Amazon IOT core's MQTT service"""
         with self._mqtt_lock:
@@ -864,3 +875,38 @@ class EmeraldHWS:
                 )
                 self.health_check_timer.daemon = True
                 self.health_check_timer.start()
+
+    def disconnect(self):
+        """Disconnect MQTT client and cancel all background timers.
+        Should be called when the integration is being unloaded to prevent
+        zombie MQTT sessions from accumulating.
+        """
+        self.logger.info("emeraldhws: Disconnecting and cleaning up")
+
+        # Cancel timers first to prevent them from triggering reconnects
+        if self.reconnect_timer:
+            self.reconnect_timer.cancel()
+            self.reconnect_timer = None
+        if self.health_check_timer:
+            self.health_check_timer.cancel()
+            self.health_check_timer = None
+
+        # Stop MQTT client
+        with self._mqtt_lock:
+            if self.mqttClient is not None:
+                try:
+                    stop_future = self.mqttClient.stop()
+                    if stop_future:
+                        stop_future.result(timeout=10)
+                    self.logger.debug(
+                        "emeraldhws: MQTT client stopped successfully during disconnect"
+                    )
+                except Exception as e:
+                    self.logger.warning(
+                        f"emeraldhws: Error stopping MQTT client during disconnect: {e}"
+                    )
+                finally:
+                    self.mqttClient = None
+
+        self._is_connected = False
+        self._connection_event.clear()
