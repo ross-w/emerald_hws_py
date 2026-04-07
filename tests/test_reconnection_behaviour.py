@@ -36,13 +36,14 @@ def test_auto_connection_on_operation_when_disconnected(
     assert mock_mqtt5_client_builder.websockets_with_default_aws_signing.called
 
 
-def test_state_refreshed_from_api_during_reconnection(
+def test_status_requested_via_mqtt_during_reconnection(
     mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
 ):
-    """Test that getAllHWS is called during reconnection to refresh state.
+    """Test that comp_query is sent via MQTT during reconnection to refresh state.
 
-    When reconnecting, getAllHWS() is called to get fresh state from the API.
-    This prevents state drift when MQTT messages are missed during disconnection.
+    When reconnecting, requestAllStatusUpdates() sends comp_query MQTT messages
+    to each HWS to trigger them to report their current status. This is what
+    the official Emerald app does and avoids replacing MQTT state with stale API data.
     """
     mock_login = Mock()
     mock_login.json.return_value = MOCK_LOGIN_RESPONSE
@@ -57,20 +58,24 @@ def test_state_refreshed_from_api_during_reconnection(
     mocker.patch.object(client._connection_event, "wait", return_value=True)
     client.connect()
 
-    # Record how many times the API was called during initial connect
-    get_call_count_after_connect = mock_requests.get.call_count
+    mqtt_client = (
+        mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    )
 
-    # Reconnect — should call getAllHWS which triggers another GET request
+    # Record publish call count after initial connect
+    publish_count_after_connect = mqtt_client.publish.call_count
+
+    # Reconnect — should send comp_query via MQTT publish
     client.reconnectMQTT()
 
-    # Verify getAllHWS was called during reconnect (GET call count increased)
-    assert mock_requests.get.call_count > get_call_count_after_connect
+    # Verify MQTT publish was called during reconnect (for comp_query)
+    assert mqtt_client.publish.call_count > publish_count_after_connect
 
 
-def test_state_refresh_failure_during_reconnection_is_non_fatal(
+def test_status_request_failure_during_reconnection_is_non_fatal(
     mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
 ):
-    """Test that a failed API refresh during reconnect doesn't break the connection."""
+    """Test that a failed MQTT status request during reconnect doesn't break the connection."""
     mock_login = Mock()
     mock_login.json.return_value = MOCK_LOGIN_RESPONSE
     mock_requests.post.return_value = mock_login
@@ -83,12 +88,15 @@ def test_state_refresh_failure_during_reconnection_is_non_fatal(
     mocker.patch.object(client._connection_event, "wait", return_value=True)
     client.connect()
 
-    # Make getAllHWS fail on reconnect
-    mock_properties_fail = Mock()
-    mock_properties_fail.json.return_value = {"code": 500}
-    mock_requests.get.return_value = mock_properties_fail
+    # Make MQTT publish fail on reconnect (simulating MQTT issues)
+    mqtt_client = (
+        mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
+    )
+    mqtt_client.publish.return_value.result.side_effect = Exception(
+        "MQTT publish failed"
+    )
 
-    # Reconnect should not raise even if getAllHWS fails
+    # Reconnect should not raise even if status request fails
     client.reconnectMQTT()
 
     # MQTT client should still be set up and connection healthy
@@ -96,10 +104,10 @@ def test_state_refresh_failure_during_reconnection_is_non_fatal(
     assert client._is_connected is True
 
 
-def test_state_refresh_exception_during_reconnection_is_non_fatal(
+def test_status_request_exception_during_reconnection_is_non_fatal(
     mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
 ):
-    """Test that reconnect survives when getAllHWS raises an exception."""
+    """Test that reconnect survives when requestAllStatusUpdates raises an exception."""
     mock_login = Mock()
     mock_login.json.return_value = MOCK_LOGIN_RESPONSE
     mock_requests.post.return_value = mock_login
@@ -112,8 +120,10 @@ def test_state_refresh_exception_during_reconnection_is_non_fatal(
     mocker.patch.object(client._connection_event, "wait", return_value=True)
     client.connect()
 
-    # Make getAllHWS raise an exception on reconnect (simulating network failure)
-    mock_requests.get.side_effect = Exception("Connection timed out")
+    # Make MQTT client None to simulate connection issue during status request
+    mocker.patch.object(
+        client, "requestAllStatusUpdates", side_effect=Exception("Connection lost")
+    )
 
     # Reconnect should not raise
     client.reconnectMQTT()
