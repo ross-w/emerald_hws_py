@@ -220,11 +220,15 @@ class EmeraldHWS:
             )
 
         # Request fresh status from all HWS via MQTT (like the official app does)
+        self._request_status_updates_safe()
+
+    def _request_status_updates_safe(self):
+        """Request status updates from all HWS, logging any failures."""
         try:
             self.requestAllStatusUpdates()
         except Exception as e:
             self.logger.warning(
-                f"emeraldhws: awsiot: Failed to request status updates after reconnect: {e}"
+                f"emeraldhws: awsiot: Failed to request status updates: {e}"
             )
 
     def connectMQTT(self):
@@ -330,14 +334,14 @@ class EmeraldHWS:
                 return_code, session_present
             )
         )
-        # Request fresh status from all HWS after the SDK auto-reconnects.
-        # The comp_query responses will naturally update last_message_time via mqttCallback.
-        try:
-            self.requestAllStatusUpdates()
-        except Exception as e:
-            self.logger.warning(
-                f"emeraldhws: awsiot: Failed to request status updates after connection resume: {e}"
-            )
+        # Request fresh status in a background thread so we don't block the
+        # AWS IoT MQTT callback thread / event loop with _wait_for_properties()
+        # and publish_future.result() calls.
+        threading.Thread(
+            target=self._request_status_updates_safe,
+            name="emeraldhws-status-refresh-on-resume",
+            daemon=True,
+        ).start()
 
     def on_lifecycle_connection_success(
         self, lifecycle_connect_success_data: mqtt5.LifecycleConnectSuccessData
@@ -894,15 +898,36 @@ class EmeraldHWS:
         self.logger.debug(f"emeraldhws: Sent comp_query to HWS {id}")
 
     def requestAllStatusUpdates(self):
-        """Requests a status update from all known HWS via MQTT comp_query"""
+        """Requests a status update from all known HWS via MQTT comp_query.
+
+        Uses a thread pool so that a slow or blocked publish for one device
+        doesn't delay queries to other devices (each can block up to 20s).
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         properties_list = self._wait_for_properties()
+        hws_ids = []
         for properties in properties_list:
             for hws in properties.get("heat_pump", []):
+                hws_id = hws.get("id")
+                if hws_id is not None:
+                    hws_ids.append(hws_id)
+
+        if not hws_ids:
+            return
+
+        with ThreadPoolExecutor(max_workers=min(5, len(hws_ids))) as executor:
+            future_to_id = {
+                executor.submit(self.requestStatusUpdate, hws_id): hws_id
+                for hws_id in hws_ids
+            }
+            for future in as_completed(future_to_id):
+                hws_id = future_to_id[future]
                 try:
-                    self.requestStatusUpdate(hws.get("id"))
+                    future.result()
                 except Exception as e:
                     self.logger.warning(
-                        f"emeraldhws: Failed to request status update for HWS {hws.get('id')}: {e}"
+                        f"emeraldhws: Failed to request status update for HWS {hws_id}: {e}"
                     )
 
     def connect(self):

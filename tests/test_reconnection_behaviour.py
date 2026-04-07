@@ -1,5 +1,6 @@
 """Tests for reconnection behaviour and state persistence."""
 
+import json
 from unittest.mock import Mock
 from emerald_hws import EmeraldHWS
 from .conftest import (
@@ -70,6 +71,22 @@ def test_status_requested_via_mqtt_during_reconnection(
 
     # Verify MQTT publish was called during reconnect (for comp_query)
     assert mqtt_client.publish.call_count > publish_count_after_connect
+
+    # Verify the payload is a comp_query with correct device details
+    publish_calls_after = mqtt_client.publish.call_args_list[
+        publish_count_after_connect:
+    ]
+    assert len(publish_calls_after) >= 1
+
+    packet = publish_calls_after[0][0][0]  # first new call, positional arg
+    assert packet.topic == "ep/heat_pump/to_gw/hws-1111-aaaa-2222-bbbb"
+    payload = json.loads(packet.payload)
+    assert payload[0]["command"] == "comp_query"
+    assert payload[0]["device_id"] == "hws-1111-aaaa-2222-bbbb"
+    assert payload[0]["property_id"] == "prop-aaaa-1111-bbbb-2222"
+    assert payload[0]["hw_id"] == "aabbccddeeff"
+    assert payload[0]["direction"] == "app2gw"
+    assert payload[1] == {}
 
 
 def test_status_request_failure_during_reconnection_is_non_fatal(
