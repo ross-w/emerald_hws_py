@@ -29,8 +29,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
 
-      - name: "Install package"
-        run: python -m pip install -e .
+      - name: "Install package (with test deps)"
+        run: python -m pip install -e ".[test]"
 
       - name: "Test import"
         run: python -c "import emerald_hws; print('✓ emerald_hws imported successfully')"
+
+      - name: "Test awscrt native bindings in sync"
+        run: python -m pytest tests/test_native_bindings.py -q
