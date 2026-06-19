@@ -685,11 +685,15 @@ def _make_client(consumption_data, omit=False):
     return client
 
 
-# (label, value, omit) — the three "no data" shapes that previously crashed
+# (label, value, omit) — the "no data" shapes _parseConsumption must tolerate
 NO_DATA_CASES = [
     ("none", None, False),  # API returns key present but null (the bug)
-    ("empty_json", "{}", False),
+    ("empty_json", "{}", False),  # empty JSON object
     ("missing", None, True),  # key absent entirely
+    ("not_json", "not-json", False),  # malformed, non-JSON string
+    ("bad_json", "{bad}", False),  # syntactically invalid JSON
+    ("empty_string", "", False),  # empty string payload
+    ("json_null", "null", False),  # valid JSON but not an object
 ]
 
 
@@ -710,8 +714,9 @@ def test_energy_getters_populated_payload():
     """A normal populated consumption_data still parses correctly (happy path)."""
     from datetime import datetime
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    current_month = datetime.now().strftime("%Y-%m")
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    current_month = now.strftime("%Y-%m")
     payload = {
         "current_hour": 0.42,
         "last_data_at": f"{today} 09:00",
@@ -727,10 +732,11 @@ def test_energy_getters_populated_payload():
     assert client.getHistoricalConsumption(HWS_ID) == payload
 
 
-def test_update_energy_usage_with_null_consumption_data():
+@pytest.mark.parametrize("consumption_data", [None, "not-json", "null", ""])
+def test_update_energy_usage_with_no_prior_data(consumption_data):
     """The MQTT update path builds the default structure (rather than raising)
-    when consumption_data is null, and records the new hour."""
-    client = _make_client(None)
+    when consumption_data is null/malformed/non-object, and records the new hour."""
+    client = _make_client(consumption_data)
 
     topic = f"ep/heat_pump/from_gw/{HWS_ID}"
     client.mqttDecodeUpdate(topic, MQTT_MSG_ENERGY_UPDATE)

@@ -567,22 +567,12 @@ class EmeraldHWS:
             for properties in self.properties:
                 for heat_pump in properties["heat_pump"]:
                     if heat_pump["id"] == id:
-                        # Get or create consumption data, treating null/malformed
+                        # Get or create consumption data, treating null/malformed/non-object
                         # consumption_data as no data
-                        default_consumption = {
-                            "current_hour": 0,
-                            "last_data_at": "",
-                            "past_seven_days": {},
-                            "monthly_consumption": {},
+                        consumption = {
+                            **self._defaultConsumption(),
+                            **self._parseConsumption(heat_pump),
                         }
-                        raw = heat_pump.get("consumption_data")
-                        if raw:
-                            try:
-                                consumption = json.loads(raw)
-                            except (ValueError, TypeError):
-                                consumption = dict(default_consumption)
-                        else:
-                            consumption = dict(default_consumption)
 
                         # Update current hour and timestamp
                         consumption["current_hour"] = current_hour_energy
@@ -760,16 +750,26 @@ class EmeraldHWS:
 
         return False
 
+    def _defaultConsumption(self):
+        """Returns a fresh, empty consumption_data structure."""
+        return {
+            "current_hour": 0,
+            "last_data_at": "",
+            "past_seven_days": {},
+            "monthly_consumption": {},
+        }
+
     def _parseConsumption(self, full_status):
-        """Parses the consumption_data field, treating null/empty/malformed as no data
+        """Parses the consumption_data field, treating null/empty/malformed/non-object as no data
         :param full_status: The full status dict for an HWS
         :returns: Parsed consumption dict, or {} when no usable data is present
         """
         raw = full_status.get("consumption_data") or "{}"
         try:
-            return json.loads(raw)
+            parsed = json.loads(raw)
         except (ValueError, TypeError):
             return {}
+        return parsed if isinstance(parsed, dict) else {}
 
     def getHourlyEnergyUsage(self, id):
         """Returns energy usage as reported by heater for the previous hour in kWh
