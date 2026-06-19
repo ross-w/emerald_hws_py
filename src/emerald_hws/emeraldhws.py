@@ -567,17 +567,12 @@ class EmeraldHWS:
             for properties in self.properties:
                 for heat_pump in properties["heat_pump"]:
                     if heat_pump["id"] == id:
-                        # Get or create consumption data
-                        consumption = (
-                            json.loads(heat_pump["consumption_data"])
-                            if heat_pump.get("consumption_data")
-                            else {
-                                "current_hour": 0,
-                                "last_data_at": "",
-                                "past_seven_days": {},
-                                "monthly_consumption": {},
-                            }
-                        )
+                        # Get or create consumption data, treating null/malformed/non-object
+                        # consumption_data as no data
+                        consumption = {
+                            **self._defaultConsumption(),
+                            **self._parseConsumption(heat_pump),
+                        }
 
                         # Update current hour and timestamp
                         consumption["current_hour"] = current_hour_energy
@@ -755,6 +750,41 @@ class EmeraldHWS:
 
         return False
 
+    @staticmethod
+    def _defaultConsumption():
+        """Returns a fresh, empty consumption_data structure."""
+        return {
+            "current_hour": 0,
+            "last_data_at": "",
+            "past_seven_days": {},
+            "monthly_consumption": {},
+        }
+
+    @staticmethod
+    def _parseConsumption(full_status):
+        """Parses the consumption_data field, treating null/empty/malformed/non-object as no data
+        :param full_status: The full status dict for an HWS
+        :returns: Parsed consumption dict, or {} when no usable data is present
+        """
+        raw = full_status.get("consumption_data")
+        if isinstance(raw, dict):
+            # Already-parsed structure; copy so normalization stays non-destructive
+            parsed = dict(raw)
+        else:
+            try:
+                parsed = json.loads(raw or "{}")
+            except (ValueError, TypeError):
+                return {}
+            if not isinstance(parsed, dict):
+                return {}
+
+        # Normalize the nested containers consumers iterate over so a malformed
+        # payload (e.g. a list where a dict is expected) can't crash the getters
+        for key in ("past_seven_days", "monthly_consumption"):
+            if key in parsed and not isinstance(parsed[key], dict):
+                parsed[key] = {}
+        return parsed
+
     def getHourlyEnergyUsage(self, id):
         """Returns energy usage as reported by heater for the previous hour in kWh
         :param id: The UUID of the HWS to query
@@ -763,7 +793,7 @@ class EmeraldHWS:
         if not full_status:
             return None
 
-        consumption = json.loads(full_status.get("consumption_data", "{}"))
+        consumption = self._parseConsumption(full_status)
         return consumption.get("current_hour")
 
     def getDailyEnergyUsage(self, id):
@@ -775,7 +805,7 @@ class EmeraldHWS:
         if not full_status:
             return None
 
-        consumption = json.loads(full_status.get("consumption_data", "{}"))
+        consumption = self._parseConsumption(full_status)
         today = datetime.now().strftime("%Y-%m-%d")
         return consumption.get("past_seven_days", {}).get(today)
 
@@ -787,7 +817,7 @@ class EmeraldHWS:
         if not full_status:
             return None
 
-        consumption = json.loads(full_status.get("consumption_data", "{}"))
+        consumption = self._parseConsumption(full_status)
         return sum(consumption.get("past_seven_days", {}).values())
 
     def getMonthlyEnergyUsage(self, id):
@@ -798,7 +828,7 @@ class EmeraldHWS:
         if not full_status:
             return None
 
-        consumption = json.loads(full_status.get("consumption_data", "{}"))
+        consumption = self._parseConsumption(full_status)
         current_month = datetime.now().strftime("%Y-%m")
         return consumption.get("monthly_consumption", {}).get(current_month)
 
@@ -810,7 +840,7 @@ class EmeraldHWS:
         if not full_status:
             return None
 
-        return json.loads(full_status.get("consumption_data", "{}"))
+        return self._parseConsumption(full_status)
 
     def currentMode(self, id):
         """Returns an integer specifying the current mode (0==boost, 1==normal, 2==quiet)
