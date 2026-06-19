@@ -750,7 +750,8 @@ class EmeraldHWS:
 
         return False
 
-    def _defaultConsumption(self):
+    @staticmethod
+    def _defaultConsumption():
         """Returns a fresh, empty consumption_data structure."""
         return {
             "current_hour": 0,
@@ -759,17 +760,30 @@ class EmeraldHWS:
             "monthly_consumption": {},
         }
 
-    def _parseConsumption(self, full_status):
+    @staticmethod
+    def _parseConsumption(full_status):
         """Parses the consumption_data field, treating null/empty/malformed/non-object as no data
         :param full_status: The full status dict for an HWS
         :returns: Parsed consumption dict, or {} when no usable data is present
         """
-        raw = full_status.get("consumption_data") or "{}"
-        try:
-            parsed = json.loads(raw)
-        except (ValueError, TypeError):
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
+        raw = full_status.get("consumption_data")
+        if isinstance(raw, dict):
+            # Already-parsed structure; copy so normalization stays non-destructive
+            parsed = dict(raw)
+        else:
+            try:
+                parsed = json.loads(raw or "{}")
+            except (ValueError, TypeError):
+                return {}
+            if not isinstance(parsed, dict):
+                return {}
+
+        # Normalize the nested containers consumers iterate over so a malformed
+        # payload (e.g. a list where a dict is expected) can't crash the getters
+        for key in ("past_seven_days", "monthly_consumption"):
+            if key in parsed and not isinstance(parsed[key], dict):
+                parsed[key] = {}
+        return parsed
 
     def getHourlyEnergyUsage(self, id):
         """Returns energy usage as reported by heater for the previous hour in kWh
