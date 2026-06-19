@@ -709,17 +709,18 @@ def test_energy_getters_no_data(label, value, omit):
     assert client.getHistoricalConsumption(HWS_ID) == {}
 
 
-def test_malformed_nested_consumption_data_normalization():
-    """Nested containers that aren't dicts are normalized to {} so the getters
-    don't crash on a malformed-but-valid-JSON payload."""
-    malformed = json.dumps(
-        {
-            "current_hour": 0.5,
-            "past_seven_days": ["not", "a", "dict"],
-            "monthly_consumption": "also-not-a-dict",
-        }
-    )
-    client = _make_client(malformed)
+@pytest.mark.parametrize(
+    "as_dict", [False, True], ids=["json_string", "dict_fast_path"]
+)
+def test_malformed_nested_consumption_data_normalization(as_dict):
+    """Nested containers that aren't dicts are normalized to {} so the getters don't
+    crash — for both the JSON-string and the already-parsed-dict (fast-path) inputs."""
+    payload = {
+        "current_hour": 0.5,
+        "past_seven_days": ["not", "a", "dict"],
+        "monthly_consumption": "also-not-a-dict",
+    }
+    client = _make_client(payload if as_dict else json.dumps(payload))
 
     assert client.getHourlyEnergyUsage(HWS_ID) == 0.5  # scalar untouched
     assert client.getWeeklyEnergyUsage(HWS_ID) == 0  # list -> {} -> sum() == 0
