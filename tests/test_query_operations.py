@@ -2,6 +2,7 @@
 
 import copy
 import json
+import pytest
 from unittest.mock import Mock
 from emerald_hws import EmeraldHWS
 from .conftest import (
@@ -663,3 +664,78 @@ def test_get_daily_energy_usage_day_boundary_scenario():
     # Verify other methods still work
     weekly = client.getWeeklyEnergyUsage(hws_id)
     assert weekly == 4.2 + 3.8 + 4.1  # Should sum existing data
+
+
+# --- consumption_data parsing edge cases (no energy history) ---
+
+HWS_ID = "hws-1111-aaaa-2222-bbbb"
+
+
+def _make_client(consumption_data, omit=False):
+    """Builds a connected client with the heat pump's consumption_data set
+    to the given value (or removed entirely when omit is True)."""
+    client = EmeraldHWS("test@example.com", "password")
+    client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
+    heat_pump = client.properties[0]["heat_pump"][0]
+    if omit:
+        heat_pump.pop("consumption_data", None)
+    else:
+        heat_pump["consumption_data"] = consumption_data
+    client._is_connected = True
+    return client
+
+
+# (label, value, omit) — the three "no data" shapes that previously crashed
+NO_DATA_CASES = [
+    ("none", None, False),  # API returns key present but null (the bug)
+    ("empty_json", "{}", False),
+    ("missing", None, True),  # key absent entirely
+]
+
+
+@pytest.mark.parametrize("label,value,omit", NO_DATA_CASES)
+def test_energy_getters_no_data(label, value, omit):
+    """All energy getters treat null/empty/missing consumption_data as no data
+    rather than raising."""
+    client = _make_client(value, omit=omit)
+
+    assert client.getHourlyEnergyUsage(HWS_ID) is None
+    assert client.getDailyEnergyUsage(HWS_ID) is None
+    assert client.getWeeklyEnergyUsage(HWS_ID) == 0
+    assert client.getMonthlyEnergyUsage(HWS_ID) is None
+    assert client.getHistoricalConsumption(HWS_ID) == {}
+
+
+def test_energy_getters_populated_payload():
+    """A normal populated consumption_data still parses correctly (happy path)."""
+    from datetime import datetime
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    current_month = datetime.now().strftime("%Y-%m")
+    payload = {
+        "current_hour": 0.42,
+        "last_data_at": f"{today} 09:00",
+        "past_seven_days": {today: 1.5},
+        "monthly_consumption": {current_month: 12.3},
+    }
+    client = _make_client(json.dumps(payload))
+
+    assert client.getHourlyEnergyUsage(HWS_ID) == 0.42
+    assert client.getDailyEnergyUsage(HWS_ID) == 1.5
+    assert client.getWeeklyEnergyUsage(HWS_ID) == 1.5
+    assert client.getMonthlyEnergyUsage(HWS_ID) == 12.3
+    assert client.getHistoricalConsumption(HWS_ID) == payload
+
+
+def test_update_energy_usage_with_null_consumption_data():
+    """The MQTT update path builds the default structure (rather than raising)
+    when consumption_data is null, and records the new hour."""
+    client = _make_client(None)
+
+    topic = f"ep/heat_pump/from_gw/{HWS_ID}"
+    client.mqttDecodeUpdate(topic, MQTT_MSG_ENERGY_UPDATE)
+
+    assert client.getHourlyEnergyUsage(HWS_ID) == 0.68
+    historical = client.getHistoricalConsumption(HWS_ID)
+    assert historical["past_seven_days"]["2099-12-31"] == 0.68
+    assert historical["monthly_consumption"]["2099-12"] == 0.68

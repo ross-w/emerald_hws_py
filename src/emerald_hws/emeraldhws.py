@@ -567,17 +567,22 @@ class EmeraldHWS:
             for properties in self.properties:
                 for heat_pump in properties["heat_pump"]:
                     if heat_pump["id"] == id:
-                        # Get or create consumption data
-                        consumption = (
-                            json.loads(heat_pump["consumption_data"])
-                            if heat_pump.get("consumption_data")
-                            else {
-                                "current_hour": 0,
-                                "last_data_at": "",
-                                "past_seven_days": {},
-                                "monthly_consumption": {},
-                            }
-                        )
+                        # Get or create consumption data, treating null/malformed
+                        # consumption_data as no data
+                        default_consumption = {
+                            "current_hour": 0,
+                            "last_data_at": "",
+                            "past_seven_days": {},
+                            "monthly_consumption": {},
+                        }
+                        raw = heat_pump.get("consumption_data")
+                        if raw:
+                            try:
+                                consumption = json.loads(raw)
+                            except (ValueError, TypeError):
+                                consumption = dict(default_consumption)
+                        else:
+                            consumption = dict(default_consumption)
 
                         # Update current hour and timestamp
                         consumption["current_hour"] = current_hour_energy
@@ -755,6 +760,17 @@ class EmeraldHWS:
 
         return False
 
+    def _parseConsumption(self, full_status):
+        """Parses the consumption_data field, treating null/empty/malformed as no data
+        :param full_status: The full status dict for an HWS
+        :returns: Parsed consumption dict, or {} when no usable data is present
+        """
+        raw = full_status.get("consumption_data") or "{}"
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return {}
+
     def getHourlyEnergyUsage(self, id):
         """Returns energy usage as reported by heater for the previous hour in kWh
         :param id: The UUID of the HWS to query
@@ -763,7 +779,7 @@ class EmeraldHWS:
         if not full_status:
             return None
 
-        consumption = json.loads(full_status.get("consumption_data", "{}"))
+        consumption = self._parseConsumption(full_status)
         return consumption.get("current_hour")
 
     def getDailyEnergyUsage(self, id):
@@ -775,7 +791,7 @@ class EmeraldHWS:
         if not full_status:
             return None
 
-        consumption = json.loads(full_status.get("consumption_data", "{}"))
+        consumption = self._parseConsumption(full_status)
         today = datetime.now().strftime("%Y-%m-%d")
         return consumption.get("past_seven_days", {}).get(today)
 
@@ -787,7 +803,7 @@ class EmeraldHWS:
         if not full_status:
             return None
 
-        consumption = json.loads(full_status.get("consumption_data", "{}"))
+        consumption = self._parseConsumption(full_status)
         return sum(consumption.get("past_seven_days", {}).values())
 
     def getMonthlyEnergyUsage(self, id):
@@ -798,7 +814,7 @@ class EmeraldHWS:
         if not full_status:
             return None
 
-        consumption = json.loads(full_status.get("consumption_data", "{}"))
+        consumption = self._parseConsumption(full_status)
         current_month = datetime.now().strftime("%Y-%m")
         return consumption.get("monthly_consumption", {}).get(current_month)
 
@@ -810,7 +826,7 @@ class EmeraldHWS:
         if not full_status:
             return None
 
-        return json.loads(full_status.get("consumption_data", "{}"))
+        return self._parseConsumption(full_status)
 
     def currentMode(self, id):
         """Returns an integer specifying the current mode (0==boost, 1==normal, 2==quiet)
