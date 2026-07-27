@@ -3,12 +3,15 @@ import logging
 import random
 import threading
 import time
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from datetime import datetime
 
 import boto3
 import requests
 from awscrt import mqtt5, auth, io
 from awsiot import mqtt5_client_builder
+
+from .exceptions import EmeraldConnectionError, EmeraldError, EmeraldTimeoutError
 
 
 class EmeraldHWS:
@@ -56,7 +59,13 @@ class EmeraldHWS:
         self._mqtt_lock = (
             threading.RLock()
         )  # Lock to protect MQTT client lifecycle operations
-        self._is_connected = False  # Flag to track connection state
+        # Tracks whether connect() has finished its full setup (login, HWS
+        # discovery, MQTT, subscriptions, timers). This is NOT a measure of
+        # whether the socket is currently up - transient disconnects leave it
+        # True on purpose, so that getFullStatus/listHWS do not call connect()
+        # and stand up a competing MQTT connection. For live connection state,
+        # use self._connection_event.
+        self._setup_complete = False
         self.mqttClient = None  # Initialise to None
 
         # Convert minutes to seconds for internal use
@@ -182,11 +191,26 @@ class EmeraldHWS:
 
         self.update_callback = update_callback
 
-    def reconnectMQTT(self, reason="scheduled"):
+    def reconnectMQTT(self, reason="scheduled", skip_if_connected=False):
         """Stops an existing MQTT connection and creates a new one
         :param reason: Reason for reconnection (scheduled, health_check, etc.)
+        :param skip_if_connected: If True, do nothing when the connection came
+            back while this call was waiting for the lock. Callers reconnecting
+            *because* the connection is down should pass True; scheduled and
+            health-check reconnects want the rebuild regardless.
         """
         with self._mqtt_lock:
+            # Re-checked under the lock: several threads can observe the same
+            # disconnect and queue up here. Without this, the second one stops
+            # the healthy client the first just built - and any QoS 1 publish
+            # already in flight on it never gets its PUBACK.
+            if skip_if_connected and self._connection_event.is_set():
+                self.logger.debug(
+                    "emeraldhws: awsiot: connection already restored, skipping "
+                    f"reconnect (reason: {reason})"
+                )
+                return
+
             self.logger.info(
                 f"emeraldhws: awsiot: Reconnecting MQTT connection (reason: {reason})"
             )
@@ -221,6 +245,59 @@ class EmeraldHWS:
 
         # Request fresh status from all HWS via MQTT (like the official app does)
         self._request_status_updates_safe()
+
+    def _ensure_mqtt_connected(self, reason, allow_reconnect=True, timeout=5):
+        """Ensures the MQTT connection is live before an operation is published.
+
+        Without this, a publish issued while disconnected goes into the mqtt5
+        client's offline queue. At QoS 1 the future only resolves on a PUBACK,
+        so the caller blocks for the full result() timeout and is told the
+        command failed - but awscrt's default offline queue behaviour
+        (FAIL_QOS0_PUBLISH_ON_DISCONNECT) re-queues un-acked QoS 1 publishes
+        for retransmission, so the command can still be delivered much later,
+        long after the caller gave up on it.
+
+        Must be called with no lock held: reconnectMQTT takes self._mqtt_lock
+        and can hold it for some time while the new connection is established.
+
+        :param reason: Reason for reconnection, passed through to reconnectMQTT
+        :param allow_reconnect: Whether a down connection should trigger a
+            reconnect. Pass False on paths that are reachable from within
+            reconnectMQTT itself, to avoid re-entering it.
+        :param timeout: Seconds to wait for the connection to come up, both
+            before and after any reconnect
+        :raises EmeraldConnectionError: if the connection is not live in time
+        """
+        if self._connection_event.is_set():
+            return
+
+        # Give the SDK's own auto-reconnect a chance first. A transient drop
+        # clears _connection_event, but awscrt is already reconnecting with
+        # backoff and usually recovers within seconds. Tearing the client down
+        # here would abort that and force a full rebuild (Cognito, websocket,
+        # re-subscribe every topic) for a blip that would have healed itself.
+        if self._connection_event.wait(timeout=timeout):
+            return
+
+        if not allow_reconnect:
+            raise EmeraldConnectionError("MQTT connection unavailable")
+
+        self.logger.info(
+            "emeraldhws: awsiot: connection still down after "
+            f"{timeout}s, reconnecting before publish (reason: {reason})"
+        )
+        try:
+            self.reconnectMQTT(reason=reason, skip_if_connected=True)
+        except EmeraldError:
+            raise
+        except Exception as e:
+            # connectMQTT makes live Cognito calls, so this is a likely
+            # failure during the outage that got us here. Don't leak
+            # botocore/awscrt types to callers.
+            raise EmeraldConnectionError(f"Unable to reconnect to MQTT: {e}") from e
+
+        if not self._connection_event.wait(timeout=timeout):
+            raise EmeraldConnectionError("MQTT connection unavailable")
 
     def _request_status_updates_safe(self):
         """Request status updates from all HWS, logging any failures."""
@@ -277,8 +354,10 @@ class EmeraldHWS:
                 on_lifecycle_disconnection=self.on_lifecycle_disconnection,
                 on_lifecycle_connection_failure=self.on_lifecycle_connection_failure,
                 on_publish_received=self.mqttCallback,
-                # The default keep-alive is 20 minutes, which we might want to reduce
-                # keep_alive_interval_sec = 60,
+                # The aws-crt default is 20 minutes, which means a half-open
+                # socket can go undetected for that long. AWS IoT accepts
+                # 30-1200 seconds; 60 gets a dead socket noticed in ~60-90s.
+                keep_alive_interval_sec=60,
             )
 
             client.start()
@@ -457,10 +536,12 @@ class EmeraldHWS:
 
         self.logger.info(f"emeraldhws: awsiot: disconnected - {reason}")
 
-        # Do NOT set _is_connected = False here. The AWS IoT SDK handles
+        # Do NOT set _setup_complete = False here. The AWS IoT SDK handles
         # transient disconnections automatically (interrupt → auto-reconnect → resume).
-        # Setting _is_connected = False would cause getFullStatus/sendControlMessage
-        # to call connect(), creating a competing MQTT connection and duplicate timers.
+        # Setting _setup_complete = False would cause getFullStatus/listHWS to
+        # call connect(), creating a competing MQTT connection and duplicate timers.
+        # Clearing _connection_event is what makes the publish paths notice: they
+        # gate on it via _ensure_mqtt_connected rather than on _setup_complete.
         self._connection_event.clear()
         return
 
@@ -473,7 +554,15 @@ class EmeraldHWS:
 
     def scheduled_reconnect(self):
         """Periodic MQTT reconnect - called by timer and reschedules itself"""
-        self.reconnectMQTT(reason="scheduled")
+        try:
+            self.reconnectMQTT(reason="scheduled")
+        except Exception as e:
+            # Must not propagate: it would skip the reschedule below and this
+            # process would then never reconnect again for its whole lifetime.
+            self.logger.warning(
+                f"emeraldhws: awsiot: Scheduled reconnect failed, will retry "
+                f"at the next interval: {e}"
+            )
 
         # Reschedule for next time
         if self.connection_timeout > 0:
@@ -520,7 +609,15 @@ class EmeraldHWS:
                         self.health_check_timer.start()
                     return
 
-                self.reconnectMQTT(reason="health_check")
+                try:
+                    self.reconnectMQTT(reason="health_check")
+                except Exception as e:
+                    # As in scheduled_reconnect: swallow so the reschedule at
+                    # the end of this method always runs.
+                    self.logger.warning(
+                        f"emeraldhws: awsiot: Health check reconnect failed, "
+                        f"will retry at the next interval: {e}"
+                    )
             else:
                 # This is a DEBUG level log to avoid cluttering logs
                 self.logger.debug(
@@ -610,7 +707,9 @@ class EmeraldHWS:
             while not self.mqttClient:
                 self.connectMQTT()
                 if retry >= 3:
-                    raise Exception("MQTT client not connected after multiple attempts")
+                    raise EmeraldConnectionError(
+                        "MQTT client not connected after multiple attempts"
+                    )
                 retry += 1
 
             mqtt_topic = "ep/heat_pump/from_gw/{}".format(id)
@@ -625,14 +724,23 @@ class EmeraldHWS:
             )
 
             # Wait for subscription to complete
-            subscribe_future.result(20)
+            try:
+                subscribe_future.result(20)
+            except (FuturesTimeoutError, TimeoutError) as e:
+                raise EmeraldTimeoutError(
+                    f"Timed out subscribing to updates for HWS {id}"
+                ) from e
+            except Exception as e:
+                raise EmeraldConnectionError(
+                    f"Failed to subscribe to updates for HWS {id}: {e}"
+                ) from e
 
     def getFullStatus(self, id):
         """Returns a dict with the full status of the specified HWS
         :param id: UUID of the HWS to get the status for
         """
 
-        if not self._is_connected:
+        if not self._setup_complete:
             self.connect()
 
         with self._state_lock:
@@ -649,12 +757,10 @@ class EmeraldHWS:
         :param payload: JSON payload to send eg {"switch":1}
         """
 
-        if not self._is_connected:
-            self.connect()
-
+        # getFullStatus performs the cold-start connect() if needed
         hwsdetail = self.getFullStatus(id)
         if not hwsdetail:
-            raise Exception(f"Unable to find HWS with ID {id}")
+            raise EmeraldError(f"Unable to find HWS with ID {id}")
 
         msg = [
             {
@@ -670,9 +776,12 @@ class EmeraldHWS:
         ]
         mqtt_topic = "ep/heat_pump/to_gw/{}".format(id)
 
+        # Must run outside self._mqtt_lock - it may reconnect, which takes it
+        self._ensure_mqtt_connected(reason="control_message")
+
         with self._mqtt_lock:
             if not self.mqttClient:
-                raise Exception("MQTT client not connected")
+                raise EmeraldConnectionError("MQTT client not connected")
             publish_future = self.mqttClient.publish(
                 mqtt5.PublishPacket(
                     topic=mqtt_topic,
@@ -682,7 +791,16 @@ class EmeraldHWS:
             )
 
         # Wait for publish to complete outside the lock
-        publish_future.result(20)  # 20 seconds
+        try:
+            publish_future.result(20)  # 20 seconds
+        except (FuturesTimeoutError, TimeoutError) as e:
+            raise EmeraldTimeoutError(
+                f"Timed out publishing control message to HWS {id}"
+            ) from e
+        except Exception as e:
+            raise EmeraldConnectionError(
+                f"Failed to publish control message to HWS {id}: {e}"
+            ) from e
 
     def turnOn(self, id):
         """Turns the specified HWS on
@@ -869,7 +987,7 @@ class EmeraldHWS:
 
     def listHWS(self):
         """Returns a list of UUIDs of all discovered HWS"""
-        if not self._is_connected:
+        if not self._setup_complete:
             self.connect()
 
         properties_list = self._wait_for_properties()
@@ -897,7 +1015,7 @@ class EmeraldHWS:
         """
         hwsdetail = self.getFullStatus(id)
         if not hwsdetail:
-            raise Exception(f"Unable to find HWS with ID {id}")
+            raise EmeraldError(f"Unable to find HWS with ID {id}")
 
         msg = [
             {
@@ -913,9 +1031,15 @@ class EmeraldHWS:
         ]
         mqtt_topic = "ep/heat_pump/to_gw/{}".format(id)
 
+        # allow_reconnect=False: reconnectMQTT calls _request_status_updates_safe,
+        # which reaches this method, so reconnecting here would re-enter it -
+        # and requestAllStatusUpdates fans out over a thread pool, so every
+        # worker would trigger its own reconnect.
+        self._ensure_mqtt_connected(reason="status_update", allow_reconnect=False)
+
         with self._mqtt_lock:
             if not self.mqttClient:
-                raise Exception("MQTT client not connected")
+                raise EmeraldConnectionError("MQTT client not connected")
             publish_future = self.mqttClient.publish(
                 mqtt5.PublishPacket(
                     topic=mqtt_topic,
@@ -924,7 +1048,16 @@ class EmeraldHWS:
                 )
             )
 
-        publish_future.result(20)
+        try:
+            publish_future.result(20)
+        except (FuturesTimeoutError, TimeoutError) as e:
+            raise EmeraldTimeoutError(
+                f"Timed out requesting status update from HWS {id}"
+            ) from e
+        except Exception as e:
+            raise EmeraldConnectionError(
+                f"Failed to request status update from HWS {id}: {e}"
+            ) from e
         self.logger.debug(f"emeraldhws: Sent comp_query to HWS {id}")
 
     def requestAllStatusUpdates(self):
@@ -967,7 +1100,7 @@ class EmeraldHWS:
         # Use lock to ensure only one thread can connect at a time
         with self._connect_lock:
             # Double-check pattern: check again inside the lock
-            if self._is_connected:
+            if self._setup_complete:
                 self.logger.debug("emeraldhws: Already connected, skipping")
                 return
 
@@ -976,7 +1109,7 @@ class EmeraldHWS:
             self.getAllHWS()
             self.connectMQTT()
             self.subscribeAllHWS()
-            self._is_connected = True
+            self._setup_complete = True
 
             # Cancel any existing timers before starting new ones to prevent accumulation
             if self.reconnect_timer:
@@ -1030,5 +1163,5 @@ class EmeraldHWS:
                 finally:
                     self.mqttClient = None
 
-            self._is_connected = False
+            self._setup_complete = False
             self._connection_event.clear()

@@ -370,6 +370,21 @@ def make_mqtt_update(device_id, property_id, **updates):
     return json.dumps(msg).encode("utf-8")
 
 
+def mark_connected(client, mocker):
+    """Make a client look fully connected to both connection checks.
+
+    Two different checks read _connection_event and both need mocking:
+
+    - connectMQTT() blocks on .wait(timeout=30) for the lifecycle callback,
+      which never fires under mocks.
+    - _ensure_mqtt_connected() reads .is_set() before every publish/subscribe.
+      Without this the real Event stays clear (only the success callback ever
+      calls .set()), so publish paths would take the reconnect branch.
+    """
+    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mocker.patch.object(client._connection_event, "is_set", return_value=True)
+
+
 @pytest.fixture
 def mock_requests(mocker):
     """Mock requests library for API calls."""
@@ -439,7 +454,8 @@ def mqtt_client_with_properties():
 
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True  # Set connected flag to bypass connection checks
+    client._setup_complete = True  # Bypass the cold-start connect()
+    client._connection_event.set()  # Bypass the pre-publish connection gate
 
     return {
         "client": client,

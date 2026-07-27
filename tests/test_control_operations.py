@@ -11,6 +11,7 @@ from emerald_hws import EmeraldHWS
 from .conftest import (
     MOCK_LOGIN_RESPONSE,
     MOCK_PROPERTY_RESPONSE_SELF,
+    mark_connected,
 )
 
 
@@ -46,7 +47,7 @@ def test_control_operations_trigger_mqtt_publish(
 
     # Create and connect client
     client = EmeraldHWS("test@example.com", "password")
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
     client.connect()
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
@@ -77,9 +78,9 @@ def test_control_operation_auto_connects_when_disconnected(
 
     # Create client but DON'T connect
     client = EmeraldHWS("test@example.com", "password")
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
 
-    assert not client._is_connected
+    assert not client._setup_complete
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
@@ -87,7 +88,7 @@ def test_control_operation_auto_connects_when_disconnected(
     client.turnOn(hws_id)
 
     # Verify connection was established
-    assert client._is_connected
+    assert client._setup_complete
 
     # Verify MQTT publish was called
     mqtt_client = (

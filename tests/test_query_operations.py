@@ -11,6 +11,7 @@ from .conftest import (
     MOCK_PROPERTY_RESPONSE_SELF,
     MOCK_PROPERTY_RESPONSE_MIXED,
     MQTT_MSG_ENERGY_UPDATE,
+    mark_connected,
 )
 
 
@@ -37,7 +38,7 @@ def test_get_full_status(
     client = EmeraldHWS("test@example.com", "password")
 
     # Patch the connection event to avoid timeout
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
 
     client.connect()
 
@@ -75,7 +76,7 @@ def test_get_full_status_nonexistent_hws(
     client = EmeraldHWS("test@example.com", "password")
 
     # Patch the connection event to avoid timeout
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
 
     client.connect()
 
@@ -89,7 +90,7 @@ def test_is_on_with_numeric_switch():
     """Test isOn() with switch=1 (numeric)."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     # Set switch to 1
     client.properties[0]["heat_pump"][0]["last_state"]["switch"] = 1
@@ -102,7 +103,7 @@ def test_is_on_with_string_switch():
     """Test isOn() with switch='on' (string)."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     # Set switch to 'on'
     client.properties[0]["heat_pump"][0]["last_state"]["switch"] = "on"
@@ -115,7 +116,7 @@ def test_is_on_when_off():
     """Test isOn() returns False when switch=0."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     # Set switch to 0
     client.properties[0]["heat_pump"][0]["last_state"]["switch"] = 0
@@ -128,7 +129,7 @@ def test_is_heating_with_work_state():
     """Test isHeating() with work_state=1 (actively heating)."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     # Set work_state to 1 (heating)
     client.properties[0]["heat_pump"][0]["last_state"]["work_state"] = 1
@@ -141,7 +142,7 @@ def test_is_heating_with_work_state_idle():
     """Test isHeating() with work_state=0 (idle/off)."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     # Set work_state to 0 (idle)
     client.properties[0]["heat_pump"][0]["last_state"]["work_state"] = 0
@@ -154,7 +155,7 @@ def test_is_heating_with_work_state_on_not_heating():
     """Test isHeating() with work_state=2 (on but not heating)."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     # Set work_state to 2 (on but not heating)
     client.properties[0]["heat_pump"][0]["last_state"]["work_state"] = 2
@@ -167,7 +168,7 @@ def test_is_heating_fallback_to_device_operation_status():
     """Test isHeating() falls back to device_operation_status when work_state not available."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     # Remove work_state to test fallback
     client.properties[0]["heat_pump"][0]["last_state"].pop("work_state", None)
@@ -187,7 +188,7 @@ def test_get_hourly_energy_usage():
     """Test retrieving hourly energy usage."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     result = client.getHourlyEnergyUsage(hws_id)
@@ -201,7 +202,7 @@ def test_current_mode():
     """Test retrieving current mode (0=boost, 1=normal, 2=quiet)."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
@@ -222,7 +223,7 @@ def test_get_info():
     """Test retrieving identifying information for a heat pump."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     info = client.getInfo(hws_id)
@@ -239,7 +240,7 @@ def test_get_info_nonexistent_hws():
     """Test getInfo returns None for non-existent heat pump."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     info = client.getInfo("nonexistent-id")
     assert info is None
@@ -268,7 +269,7 @@ def test_list_hws(
     client = EmeraldHWS("test@example.com", "password")
 
     # Patch the connection event to avoid timeout
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
 
     client.connect()
 
@@ -302,7 +303,7 @@ def test_list_hws_multiple(
     client = EmeraldHWS("test@example.com", "password")
 
     # Patch the connection event to avoid timeout
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
 
     client.connect()
 
@@ -318,7 +319,7 @@ def test_get_hourly_energy_usage_returns_updated_values():
     """Test that getHourlyEnergyUsage returns updated values after MQTT message processing."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
@@ -343,7 +344,7 @@ def test_get_hourly_energy_usage_with_multiple_updates():
     """Test that getHourlyEnergyUsage reflects the most recent MQTT update."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     topic = f"ep/heat_pump/from_gw/{hws_id}"
@@ -366,7 +367,7 @@ def test_get_daily_energy_usage():
     """Test retrieving daily energy usage returns appropriate value."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     result = client.getDailyEnergyUsage(hws_id)
@@ -397,7 +398,7 @@ def test_get_daily_energy_usage_missing_date_in_data():
 
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
     client.properties[0]["heat_pump"][0]["consumption_data"] = custom_consumption
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     result = client.getDailyEnergyUsage(hws_id)
@@ -410,7 +411,7 @@ def test_get_weekly_energy_usage():
     """Test retrieving weekly energy usage structure."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     result = client.getWeeklyEnergyUsage(hws_id)
@@ -427,7 +428,7 @@ def test_get_monthly_energy_usage():
     """Test retrieving monthly energy usage returns numeric value when data exists."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     result = client.getMonthlyEnergyUsage(hws_id)
@@ -458,7 +459,7 @@ def test_get_monthly_energy_usage_missing_month_in_data():
 
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
     client.properties[0]["heat_pump"][0]["consumption_data"] = custom_consumption
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     result = client.getMonthlyEnergyUsage(hws_id)
@@ -471,7 +472,7 @@ def test_get_historical_consumption():
     """Test retrieving full historical consumption data structure."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     result = client.getHistoricalConsumption(hws_id)
@@ -510,7 +511,7 @@ def test_get_daily_energy_usage_handles_invalid_data_gracefully():
 
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
     client.properties[0]["heat_pump"][0]["consumption_data"] = custom_consumption
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     result = client.getDailyEnergyUsage(hws_id)
@@ -541,7 +542,7 @@ def test_get_monthly_energy_usage_handles_missing_month():
 
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
     client.properties[0]["heat_pump"][0]["consumption_data"] = custom_consumption
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     result = client.getMonthlyEnergyUsage(hws_id)
@@ -566,7 +567,7 @@ def test_energy_methods_handle_edge_cases_gracefully():
 
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
     client.properties[0]["heat_pump"][0]["consumption_data"] = custom_consumption
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
@@ -604,7 +605,7 @@ def test_energy_methods_handle_various_date_formats_in_data():
 
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
     client.properties[0]["heat_pump"][0]["consumption_data"] = custom_consumption
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
@@ -648,7 +649,7 @@ def test_get_daily_energy_usage_day_boundary_scenario():
 
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
     client.properties[0]["heat_pump"][0]["consumption_data"] = custom_consumption
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
@@ -680,7 +681,7 @@ def _make_client(consumption_data, omit=False):
         heat_pump.pop("consumption_data", None)
     else:
         heat_pump["consumption_data"] = consumption_data
-    client._is_connected = True
+    client._setup_complete = True
     return client
 
 

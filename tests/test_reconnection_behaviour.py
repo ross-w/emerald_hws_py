@@ -6,6 +6,7 @@ from emerald_hws import EmeraldHWS
 from .conftest import (
     MOCK_LOGIN_RESPONSE,
     MOCK_PROPERTY_RESPONSE_SELF,
+    mark_connected,
 )
 
 
@@ -23,16 +24,16 @@ def test_auto_connection_on_operation_when_disconnected(
 
     # Create client but don't connect
     client = EmeraldHWS("test@example.com", "password")
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
 
-    assert not client._is_connected
+    assert not client._setup_complete
 
     # Attempt operation - should auto-connect
     hws_id = "hws-1111-aaaa-2222-bbbb"
     client.turnOn(hws_id)
 
     # Verify auto-connection occurred
-    assert client._is_connected
+    assert client._setup_complete
     assert mock_boto3.client.called
     assert mock_mqtt5_client_builder.websockets_with_default_aws_signing.called
 
@@ -56,7 +57,7 @@ def test_status_requested_via_mqtt_during_reconnection(
 
     # Execute
     client = EmeraldHWS("test@example.com", "password")
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
     client.connect()
 
     mqtt_client = (
@@ -102,7 +103,7 @@ def test_status_request_failure_during_reconnection_is_non_fatal(
     mock_requests.get.return_value = mock_properties
 
     client = EmeraldHWS("test@example.com", "password")
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
     client.connect()
 
     # Make MQTT publish fail on reconnect (simulating MQTT issues)
@@ -118,7 +119,7 @@ def test_status_request_failure_during_reconnection_is_non_fatal(
 
     # MQTT client should still be set up and connection healthy
     assert client.mqttClient is not None
-    assert client._is_connected is True
+    assert client._setup_complete is True
 
 
 def test_status_request_exception_during_reconnection_is_non_fatal(
@@ -134,7 +135,7 @@ def test_status_request_exception_during_reconnection_is_non_fatal(
     mock_requests.get.return_value = mock_properties
 
     client = EmeraldHWS("test@example.com", "password")
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
     client.connect()
 
     # Make MQTT client None to simulate connection issue during status request
@@ -147,7 +148,7 @@ def test_status_request_exception_during_reconnection_is_non_fatal(
 
     # MQTT client should still be set up and connection healthy
     assert client.mqttClient is not None
-    assert client._is_connected is True
+    assert client._setup_complete is True
 
 
 def test_mqtt_subscriptions_after_reconnection(
@@ -164,7 +165,7 @@ def test_mqtt_subscriptions_after_reconnection(
 
     # Execute
     client = EmeraldHWS("test@example.com", "password")
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
     client.connect()
 
     # Track subscription calls
@@ -200,12 +201,12 @@ def test_disconnect_stops_mqtt_and_cancels_timers(
     mock_requests.get.return_value = mock_properties
 
     client = EmeraldHWS("test@example.com", "password")
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
     client.connect()
 
     # Verify timers and client are active after connect
     assert client.mqttClient is not None
-    assert client._is_connected is True
+    assert client._setup_complete is True
     assert client.reconnect_timer is not None
     assert client.health_check_timer is not None
 
@@ -220,7 +221,7 @@ def test_disconnect_stops_mqtt_and_cancels_timers(
 
     # Verify everything is cleaned up
     assert client.mqttClient is None
-    assert client._is_connected is False
+    assert client._setup_complete is False
     assert client.reconnect_timer is None
     assert client.health_check_timer is None
 
@@ -235,4 +236,4 @@ def test_disconnect_handles_missing_client_gracefully(
     client.disconnect()
 
     assert client.mqttClient is None
-    assert client._is_connected is False
+    assert client._setup_complete is False

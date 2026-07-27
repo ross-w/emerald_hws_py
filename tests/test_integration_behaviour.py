@@ -9,6 +9,7 @@ from .conftest import (
     MQTT_MSG_TEMP_UPDATE,
     MQTT_MSG_SWITCH_OFF,
     MQTT_MSG_SWITCH_ON,
+    mark_connected,
 )
 
 
@@ -32,13 +33,13 @@ def test_complete_login_to_mqtt_flow(
         callback_calls.append(True)
 
     client = EmeraldHWS("test@example.com", "password", update_callback=test_callback)
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
 
     # Connect - this should: login → get properties → connect MQTT → subscribe
     client.connect()
 
     # Verify the flow worked
-    assert client._is_connected
+    assert client._setup_complete
     assert len(client.properties) == 1
     assert client.properties[0]["property_type"] == "Self"
 
@@ -67,7 +68,7 @@ def test_control_command_with_mqtt_response(
 
     # Execute
     client = EmeraldHWS("test@example.com", "password")
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
     client.connect()
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
@@ -103,12 +104,12 @@ def test_shared_property_integration_flow(
 
     # Execute flow
     client = EmeraldHWS("customer@example.com", "password")
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
 
     client.connect()
 
     # Verify shared property flow works
-    assert client._is_connected
+    assert client._setup_complete
     assert len(client.properties) == 1
     assert client.properties[0]["property_type"] == "Shared"
     assert client.properties[0]["heat_pump"][0]["id"] == "hws-9999-eeee-8888-ffff"
@@ -137,7 +138,7 @@ def test_mixed_properties_integration(
 
     # Execute
     client = EmeraldHWS("user@example.com", "password")
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
 
     client.connect()
 
@@ -178,7 +179,7 @@ def test_state_persistence_through_reconnection(
 
     # Execute
     client = EmeraldHWS("test@example.com", "password")
-    mocker.patch.object(client._connection_event, "wait", return_value=True)
+    mark_connected(client, mocker)
 
     client.connect()
     hws_id = "hws-1111-aaaa-2222-bbbb"
