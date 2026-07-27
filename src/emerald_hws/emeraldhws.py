@@ -191,11 +191,26 @@ class EmeraldHWS:
 
         self.update_callback = update_callback
 
-    def reconnectMQTT(self, reason="scheduled"):
+    def reconnectMQTT(self, reason="scheduled", skip_if_connected=False):
         """Stops an existing MQTT connection and creates a new one
         :param reason: Reason for reconnection (scheduled, health_check, etc.)
+        :param skip_if_connected: If True, do nothing when the connection came
+            back while this call was waiting for the lock. Callers reconnecting
+            *because* the connection is down should pass True; scheduled and
+            health-check reconnects want the rebuild regardless.
         """
         with self._mqtt_lock:
+            # Re-checked under the lock: several threads can observe the same
+            # disconnect and queue up here. Without this, the second one stops
+            # the healthy client the first just built - and any QoS 1 publish
+            # already in flight on it never gets its PUBACK.
+            if skip_if_connected and self._connection_event.is_set():
+                self.logger.debug(
+                    "emeraldhws: awsiot: connection already restored, skipping "
+                    f"reconnect (reason: {reason})"
+                )
+                return
+
             self.logger.info(
                 f"emeraldhws: awsiot: Reconnecting MQTT connection (reason: {reason})"
             )
@@ -235,9 +250,12 @@ class EmeraldHWS:
         """Ensures the MQTT connection is live before an operation is published.
 
         Without this, a publish issued while disconnected goes into the mqtt5
-        client's offline queue and, at QoS 1, its future only resolves on a
-        PUBACK that never arrives - so the caller blocks for the full result()
-        timeout and the command is silently never delivered.
+        client's offline queue. At QoS 1 the future only resolves on a PUBACK,
+        so the caller blocks for the full result() timeout and is told the
+        command failed - but awscrt's default offline queue behaviour
+        (FAIL_QOS0_PUBLISH_ON_DISCONNECT) re-queues un-acked QoS 1 publishes
+        for retransmission, so the command can still be delivered much later,
+        long after the caller gave up on it.
 
         Must be called with no lock held: reconnectMQTT takes self._mqtt_lock
         and can hold it for some time while the new connection is established.
@@ -246,18 +264,37 @@ class EmeraldHWS:
         :param allow_reconnect: Whether a down connection should trigger a
             reconnect. Pass False on paths that are reachable from within
             reconnectMQTT itself, to avoid re-entering it.
-        :param timeout: Seconds to wait for the connection to come up
+        :param timeout: Seconds to wait for the connection to come up, both
+            before and after any reconnect
         :raises EmeraldConnectionError: if the connection is not live in time
         """
         if self._connection_event.is_set():
             return
 
-        if allow_reconnect:
-            self.logger.info(
-                "emeraldhws: awsiot: connection is down, reconnecting before "
-                f"publish (reason: {reason})"
-            )
-            self.reconnectMQTT(reason=reason)
+        # Give the SDK's own auto-reconnect a chance first. A transient drop
+        # clears _connection_event, but awscrt is already reconnecting with
+        # backoff and usually recovers within seconds. Tearing the client down
+        # here would abort that and force a full rebuild (Cognito, websocket,
+        # re-subscribe every topic) for a blip that would have healed itself.
+        if self._connection_event.wait(timeout=timeout):
+            return
+
+        if not allow_reconnect:
+            raise EmeraldConnectionError("MQTT connection unavailable")
+
+        self.logger.info(
+            "emeraldhws: awsiot: connection still down after "
+            f"{timeout}s, reconnecting before publish (reason: {reason})"
+        )
+        try:
+            self.reconnectMQTT(reason=reason, skip_if_connected=True)
+        except EmeraldError:
+            raise
+        except Exception as e:
+            # connectMQTT makes live Cognito calls, so this is a likely
+            # failure during the outage that got us here. Don't leak
+            # botocore/awscrt types to callers.
+            raise EmeraldConnectionError(f"Unable to reconnect to MQTT: {e}") from e
 
         if not self._connection_event.wait(timeout=timeout):
             raise EmeraldConnectionError("MQTT connection unavailable")
@@ -517,7 +554,15 @@ class EmeraldHWS:
 
     def scheduled_reconnect(self):
         """Periodic MQTT reconnect - called by timer and reschedules itself"""
-        self.reconnectMQTT(reason="scheduled")
+        try:
+            self.reconnectMQTT(reason="scheduled")
+        except Exception as e:
+            # Must not propagate: it would skip the reschedule below and this
+            # process would then never reconnect again for its whole lifetime.
+            self.logger.warning(
+                f"emeraldhws: awsiot: Scheduled reconnect failed, will retry "
+                f"at the next interval: {e}"
+            )
 
         # Reschedule for next time
         if self.connection_timeout > 0:
@@ -564,7 +609,15 @@ class EmeraldHWS:
                         self.health_check_timer.start()
                     return
 
-                self.reconnectMQTT(reason="health_check")
+                try:
+                    self.reconnectMQTT(reason="health_check")
+                except Exception as e:
+                    # As in scheduled_reconnect: swallow so the reschedule at
+                    # the end of this method always runs.
+                    self.logger.warning(
+                        f"emeraldhws: awsiot: Health check reconnect failed, "
+                        f"will retry at the next interval: {e}"
+                    )
             else:
                 # This is a DEBUG level log to avoid cluttering logs
                 self.logger.debug(
