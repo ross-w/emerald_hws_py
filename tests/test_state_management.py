@@ -31,7 +31,7 @@ def test_concurrent_energy_method_access():
 
     client = EmeraldHWS("test@example.com", "password")
     client.properties = MOCK_PROPERTY_RESPONSE_SELF["info"]["property"]
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
@@ -106,7 +106,7 @@ def test_concurrent_energy_updates_and_reads():
 
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     topic = f"ep/heat_pump/from_gw/{hws_id}"
@@ -266,7 +266,7 @@ def test_mqtt_state_reflected_in_queries():
     """Test that MQTT updates are immediately reflected in query methods."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
@@ -294,7 +294,7 @@ def test_heating_state_updates_consistency():
     """Test that heating state updates are consistent between MQTT and fallback logic."""
     client = EmeraldHWS("test@example.com", "password")
     client.properties = copy.deepcopy(MOCK_PROPERTY_RESPONSE_SELF["info"]["property"])
-    client._is_connected = True
+    client._setup_complete = True
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
