@@ -358,6 +358,11 @@ class EmeraldHWS:
                 # socket can go undetected for that long. AWS IoT accepts
                 # 30-1200 seconds; 60 gets a dead socket noticed in ~60-90s.
                 keep_alive_interval_sec=60,
+                # Skip aws-crt's IoT usage-metrics path: it only reports the SDK
+                # name and version, and building it breaks outright when two
+                # awscrt versions are loaded at once. Supported since awsiotsdk
+                # 1.24.0. See tests/test_native_bindings.py for the full rationale.
+                enable_metrics_collection=False,
             )
 
             client.start()

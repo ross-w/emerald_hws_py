@@ -310,6 +310,20 @@ def test_keep_alive_interval_is_sixty_seconds(
     assert kwargs["keep_alive_interval_sec"] == 60
 
 
+def test_iot_metrics_collection_is_disabled(
+    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
+):
+    """awscrt's usage-metrics path must stay off.
+
+    Building it breaks outright when two awscrt versions are loaded at once; see
+    tests/test_native_bindings.py for why that happens under Home Assistant.
+    """
+    _connected_client(mock_requests, mocker)
+
+    kwargs = mock_mqtt5_client_builder.websockets_with_default_aws_signing.call_args[1]
+    assert kwargs["enable_metrics_collection"] is False
+
+
 def test_reconnect_is_skipped_if_connection_restored_while_waiting_for_lock(
     mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
 ):
