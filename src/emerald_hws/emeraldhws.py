@@ -358,6 +358,17 @@ class EmeraldHWS:
                 # socket can go undetected for that long. AWS IoT accepts
                 # 30-1200 seconds; 60 gets a dead socket noticed in ~60-90s.
                 keep_alive_interval_sec=60,
+                # Skip aws-crt's IoT usage-metrics path. It only reports the SDK
+                # name and version in the CONNECT username, but since awscrt
+                # 0.35.0 building it reads ClientTlsContext._certificate_source -
+                # a slot only that release's awscrt.io declares. Home Assistant
+                # imports awscrt during startup (cloud -> botocore) and then
+                # upgrades it on disk when installing this library, so the new
+                # metrics code can meet the old cached class and every connect()
+                # fails for the life of the process. Disabling it also keeps the
+                # native mqtt5_client_new metrics arguments at (False, None),
+                # which every awscrt accepts. Supported since awsiotsdk 1.24.0.
+                enable_metrics_collection=False,
             )
 
             client.start()

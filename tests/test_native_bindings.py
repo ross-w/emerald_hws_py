@@ -44,3 +44,26 @@ def test_awscrt_wrapper_native_arity_in_sync():
             "upgrade. Fix: pip install --force-reinstall --no-cache-dir awscrt"
         )
     assert client is not None
+
+
+def test_metrics_disabled_build_crosses_native_binding():
+    """Build offline the way connectMQTT does, with metrics collection off.
+
+    This is the production kwarg combination, so it is the one worth exercising
+    against the real awscrt. Disabling metrics makes awscrt.mqtt5 skip
+    _create_metrics_mqtt5 (which since 0.35.0 reads the private
+    ClientTlsContext._certificate_source) and pass (False, None) for the two
+    native metrics arguments -- values every awscrt release accepts.
+    """
+    creds = auth.AwsCredentialsProvider.new_static(
+        access_key_id="AKIDEXAMPLE",
+        secret_access_key="secret",
+    )
+    client = mqtt5_client_builder.websockets_with_default_aws_signing(
+        endpoint="example-ats.iot.ap-southeast-2.amazonaws.com",
+        region="ap-southeast-2",
+        credentials_provider=creds,
+        enable_metrics_collection=False,
+    )  # builds Client -> _awscrt.mqtt5_client_new; no .start(), no network
+
+    assert client is not None
