@@ -315,11 +315,8 @@ def test_iot_metrics_collection_is_disabled(
 ):
     """awscrt's usage-metrics path must stay off.
 
-    Since awscrt 0.35.0, building it reads ClientTlsContext._certificate_source -
-    a slot only that release's awscrt.io declares. Home Assistant imports awscrt
-    during startup (cloud -> hass_nabucasa -> botocore) and then upgrades it on
-    disk when installing this library, so the freshly loaded metrics code can
-    meet the old cached class and every connect() fails until HA is restarted.
+    Building it breaks outright when two awscrt versions are loaded at once; see
+    tests/test_native_bindings.py for why that happens under Home Assistant.
     """
     _connected_client(mock_requests, mocker)
 
