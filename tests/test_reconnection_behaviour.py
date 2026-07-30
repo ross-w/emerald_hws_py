@@ -140,6 +140,12 @@ def test_status_request_failure_on_initial_connect_is_non_fatal(
 
     client.connect()
 
+    # The refresh was attempted and failed, not skipped - without this the test
+    # would pass vacuously if connect() stopped refreshing altogether.
+    assert mqtt_client.publish.call_count == 1
+    header, _ = json.loads(mqtt_client.publish.call_args[0][0].payload)
+    assert header["command"] == "comp_query"
+
     assert client._setup_complete is True
     assert client.mqttClient is not None
     # Subscriptions and timers were still set up before the failed refresh.
@@ -247,6 +253,9 @@ def test_status_refresh_skipped_when_setup_torn_down(
     client._request_status_updates_safe()
 
     request_all.assert_not_called()
+    # The early return must not leak the guard, or this one skip would disable
+    # every later refresh for the life of the process.
+    assert not client._status_refresh_lock.locked()
 
 
 def test_status_refresh_failure_releases_the_guard(

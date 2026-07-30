@@ -4,6 +4,7 @@ import random
 import threading
 import time
 from concurrent.futures import TimeoutError as FuturesTimeoutError
+from contextlib import contextmanager
 from datetime import datetime
 
 import boto3
@@ -12,6 +13,24 @@ from awscrt import mqtt5, auth, io
 from awsiot import mqtt5_client_builder
 
 from .exceptions import EmeraldConnectionError, EmeraldError, EmeraldTimeoutError
+
+
+@contextmanager
+def _try_acquire(lock):
+    """Acquire lock without blocking, yielding whether it was taken.
+
+    Releases on the way out only if this block is what acquired it, so an
+    early return or a raise inside the body cannot leak the lock, and a body
+    that never got it cannot release someone else's hold. That last part is
+    why this tracks a flag rather than checking lock.locked() on exit -
+    locked() cannot distinguish our hold from another thread's.
+    """
+    acquired = lock.acquire(blocking=False)
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            lock.release()
 
 
 class EmeraldHWS:
@@ -320,28 +339,32 @@ class EmeraldHWS:
         call a no-op, and skipping is correct: the refresh already in flight
         covers the same devices.
         """
-        if not self._status_refresh_lock.acquire(blocking=False):
-            self.logger.debug(
-                "emeraldhws: awsiot: Status refresh already in progress, skipping"
-            )
-            return
-
-        try:
-            # connect() releases _connect_lock before calling this, so a
-            # disconnect() can land in between and pull the client out from
-            # under us. Nothing to ask, and no client to ask over.
-            if self.mqttClient is None or not self._setup_complete:
+        with _try_acquire(self._status_refresh_lock) as acquired:
+            if not acquired:
                 self.logger.debug(
-                    "emeraldhws: awsiot: Skipping status refresh, MQTT setup not complete"
+                    "emeraldhws: awsiot: Status refresh already in progress, skipping"
                 )
                 return
-            self.requestAllStatusUpdates()
-        except Exception as e:
-            self.logger.warning(
-                f"emeraldhws: awsiot: Failed to request status updates: {e}"
-            )
-        finally:
-            self._status_refresh_lock.release()
+
+            try:
+                # connect() releases _connect_lock before calling this, so a
+                # disconnect() can land in between and pull the client out from
+                # under us. Nothing to ask, and no client to ask over.
+                if self.mqttClient is None or not self._setup_complete:
+                    self.logger.debug(
+                        "emeraldhws: awsiot: Skipping status refresh, MQTT setup not complete"
+                    )
+                    return
+                self.requestAllStatusUpdates()
+            except Exception as e:
+                # Traceback included: this swallows the only view callers get
+                # of a fan-out failure, and the interesting ones are
+                # intermittent. Stays at warning rather than logger.exception's
+                # error - the refresh is best-effort and the client is fine.
+                self.logger.warning(
+                    f"emeraldhws: awsiot: Failed to request status updates: {e}",
+                    exc_info=True,
+                )
 
     def connectMQTT(self):
         """Establishes a connection to Amazon IOT core's MQTT service"""

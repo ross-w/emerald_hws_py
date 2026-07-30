@@ -109,3 +109,6 @@ def test_control_operation_auto_connects_when_disconnected(
     assert commands[-1] == "control", (
         f"the control message should be the final publish, got {commands}"
     )
+    assert commands.count("control") == 1, (
+        f"turnOn should publish exactly one control message, got {commands}"
+    )
