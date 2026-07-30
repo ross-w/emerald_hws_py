@@ -59,6 +59,10 @@ class EmeraldHWS:
         self._mqtt_lock = (
             threading.RLock()
         )  # Lock to protect MQTT client lifecycle operations
+        # Held for the duration of a status refresh. Non-reentrant and only
+        # ever acquired non-blocking, so overlapping refreshes collapse into
+        # one - see _request_status_updates_safe.
+        self._status_refresh_lock = threading.Lock()
         # Tracks whether connect() has finished its full setup (login, HWS
         # discovery, MQTT, subscriptions, timers). This is NOT a measure of
         # whether the socket is currently up - transient disconnects leave it
@@ -300,13 +304,44 @@ class EmeraldHWS:
             raise EmeraldConnectionError("MQTT connection unavailable")
 
     def _request_status_updates_safe(self):
-        """Request status updates from all HWS, logging any failures."""
+        """Request status updates from all HWS, logging any failures.
+
+        Best-effort by design: three separate paths call this (initial connect,
+        reconnectMQTT, and on_connection_resumed), so it must never raise into
+        any of them, and it must tolerate being called while another refresh is
+        already running.
+
+        The non-blocking lock is what makes that safe. It is a plain Lock, not
+        an RLock, on purpose: requestAllStatusUpdates fans out over a thread
+        pool and each worker calls getFullStatus, which calls connect() if
+        setup was torn down underneath it - and connect() ends by calling this
+        method again. A re-entrant lock would let that recurse, one nested
+        thread pool per worker. Failing the acquire instead makes the nested
+        call a no-op, and skipping is correct: the refresh already in flight
+        covers the same devices.
+        """
+        if not self._status_refresh_lock.acquire(blocking=False):
+            self.logger.debug(
+                "emeraldhws: awsiot: Status refresh already in progress, skipping"
+            )
+            return
+
         try:
+            # connect() releases _connect_lock before calling this, so a
+            # disconnect() can land in between and pull the client out from
+            # under us. Nothing to ask, and no client to ask over.
+            if self.mqttClient is None or not self._setup_complete:
+                self.logger.debug(
+                    "emeraldhws: awsiot: Skipping status refresh, MQTT setup not complete"
+                )
+                return
             self.requestAllStatusUpdates()
         except Exception as e:
             self.logger.warning(
                 f"emeraldhws: awsiot: Failed to request status updates: {e}"
             )
+        finally:
+            self._status_refresh_lock.release()
 
     def connectMQTT(self):
         """Establishes a connection to Amazon IOT core's MQTT service"""

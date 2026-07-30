@@ -385,16 +385,37 @@ def mark_connected(client, mocker):
     mocker.patch.object(client._connection_event, "is_set", return_value=True)
 
 
-def connect_and_clear_publishes(client):
+def connect_and_clear_publishes(client, expected_comp_queries=1):
     """Run connect(), then forget the comp_query burst it sends on startup.
 
     connect() publishes a comp_query per heat pump so initial state comes from
     the device rather than the REST snapshot, which lags behind. Tests that
     assert on a later publish - a control message, an explicit status request -
     care only about that one, so drop the startup calls from the mock.
+
+    The burst is checked before it is dropped, so that a connect() which grew
+    an unexpected extra publish fails here rather than being swallowed.
+
+    :param expected_comp_queries: how many heat pumps the mocked API returns;
+        defaults to 1, matching MOCK_PROPERTY_RESPONSE_SELF.
     """
     client.connect()
-    client.mqttClient.publish.reset_mock()
+
+    publish = client.mqttClient.publish
+    assert publish.call_count == expected_comp_queries, (
+        f"connect() should publish exactly {expected_comp_queries} comp_query "
+        f"message(s), got {publish.call_count}: {publish.call_args_list}"
+    )
+    for call in publish.call_args_list:
+        packet = call[0][0]
+        header, body = json.loads(packet.payload)
+        assert header["command"] == "comp_query", (
+            f"connect() published an unexpected '{header['command']}' message"
+        )
+        assert packet.topic == f"ep/heat_pump/to_gw/{header['device_id']}"
+        assert body == {}
+
+    publish.reset_mock()
 
 
 @pytest.fixture

@@ -1,6 +1,7 @@
 """Tests for reconnection behaviour and state persistence."""
 
 import json
+import threading
 from unittest.mock import Mock
 from emerald_hws import EmeraldHWS
 from .conftest import (
@@ -147,6 +148,131 @@ def test_status_request_failure_on_initial_connect_is_non_fatal(
     assert client.health_check_timer is not None
     client.reconnect_timer.cancel()
     client.health_check_timer.cancel()
+
+
+def test_concurrent_status_refresh_collapses_into_one(
+    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
+):
+    """Test that a refresh starting while another is in flight is skipped.
+
+    connect() releases _connect_lock before refreshing, so a scheduled
+    reconnect or a resume callback can start its own refresh over the top.
+    They cover the same devices, so the second must be dropped rather than
+    doubling the comp_query burst.
+    """
+    _mock_api(mock_requests)
+
+    client = EmeraldHWS("test@example.com", "password")
+    mark_connected(client, mocker)
+    client.connect()
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocked_refresh():
+        started.set()
+        assert release.wait(timeout=5)
+
+    request_all = mocker.patch.object(
+        client, "requestAllStatusUpdates", side_effect=blocked_refresh
+    )
+
+    first = threading.Thread(target=client._request_status_updates_safe)
+    first.start()
+    try:
+        assert started.wait(timeout=5), "first refresh never started"
+
+        # Second refresh arrives while the first still holds the lock.
+        client._request_status_updates_safe()
+        assert request_all.call_count == 1
+    finally:
+        release.set()
+        first.join(timeout=5)
+
+    assert request_all.call_count == 1
+
+    # The lock is released afterwards, so a later refresh still runs.
+    client._request_status_updates_safe()
+    assert request_all.call_count == 2
+
+
+def test_nested_status_refresh_does_not_recurse(
+    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
+):
+    """Test that a refresh reaching back into itself on one thread is a no-op.
+
+    requestAllStatusUpdates fans out to workers that call getFullStatus, which
+    calls connect() if setup was torn down - and connect() ends by refreshing.
+    The guard lock is non-reentrant precisely so that path stops here instead
+    of spawning a nested thread pool per worker.
+    """
+    _mock_api(mock_requests)
+
+    client = EmeraldHWS("test@example.com", "password")
+    mark_connected(client, mocker)
+    client.connect()
+
+    depth = []
+
+    def reenter():
+        depth.append(len(depth) + 1)
+        client._request_status_updates_safe()
+
+    mocker.patch.object(client, "requestAllStatusUpdates", side_effect=reenter)
+
+    client._request_status_updates_safe()
+
+    assert depth == [1], f"refresh recursed {len(depth)} levels deep"
+
+
+def test_status_refresh_skipped_when_setup_torn_down(
+    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
+):
+    """Test that a refresh is skipped if disconnect() lands underneath it.
+
+    connect() refreshes outside _connect_lock, so disconnect() can null the
+    client in between. Asking over a dead client is pointless, and letting it
+    through would have getFullStatus call connect() and stand up a competing
+    connection.
+    """
+    _mock_api(mock_requests)
+
+    client = EmeraldHWS("test@example.com", "password")
+    mark_connected(client, mocker)
+    client.connect()
+
+    request_all = mocker.patch.object(client, "requestAllStatusUpdates")
+
+    client.disconnect()
+    client._request_status_updates_safe()
+
+    request_all.assert_not_called()
+
+
+def test_status_refresh_failure_releases_the_guard(
+    mock_requests, mock_boto3, mock_mqtt5_client_builder, mock_auth, mock_io, mocker
+):
+    """Test that a raising refresh does not wedge the guard lock shut.
+
+    Without the finally, one failed refresh would silently disable every later
+    one for the life of the process.
+    """
+    _mock_api(mock_requests)
+
+    client = EmeraldHWS("test@example.com", "password")
+    mark_connected(client, mocker)
+    client.connect()
+
+    request_all = mocker.patch.object(
+        client,
+        "requestAllStatusUpdates",
+        side_effect=[Exception("Connection lost"), None],
+    )
+
+    client._request_status_updates_safe()
+    client._request_status_updates_safe()
+
+    assert request_all.call_count == 2
 
 
 def test_status_requested_via_mqtt_during_reconnection(

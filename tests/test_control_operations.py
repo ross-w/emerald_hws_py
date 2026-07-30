@@ -92,12 +92,20 @@ def test_control_operation_auto_connects_when_disconnected(
     # Verify connection was established
     assert client._setup_complete
 
-    # Verify MQTT publish was called. The auto-connect happens first and sends
-    # its own comp_query, so the control message is the last publish rather
-    # than the only one.
+    # Verify MQTT publish was called. The auto-connect runs first and sends its
+    # own comp_query to seed state, so the control message is the last publish
+    # rather than the only one - assert on both, so a control message that
+    # silently stopped being sent cannot pass on the comp_query alone.
     mqtt_client = (
         mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
     )
-    assert mqtt_client.publish.called
-    header, _ = json.loads(mqtt_client.publish.call_args[0][0].payload)
-    assert header["command"] == "control"
+    commands = [
+        json.loads(call[0][0].payload)[0]["command"]
+        for call in mqtt_client.publish.call_args_list
+    ]
+    assert "comp_query" in commands[:-1], (
+        f"auto-connect should have seeded state with a comp_query, got {commands}"
+    )
+    assert commands[-1] == "control", (
+        f"the control message should be the final publish, got {commands}"
+    )
