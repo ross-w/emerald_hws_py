@@ -1136,6 +1136,14 @@ class EmeraldHWS:
                 self.health_check_timer.daemon = True
                 self.health_check_timer.start()
 
+        # Seed state from MQTT rather than the REST snapshot, which lags behind
+        # what the device reports. Mirrors reconnectMQTT, which does the same
+        # after resubscribing. Outside _connect_lock: requestStatusUpdate fans
+        # out over a thread pool and each worker calls getFullStatus, which
+        # calls connect() if setup is incomplete - and _connect_lock is a plain
+        # Lock, so re-entering it would deadlock.
+        self._request_status_updates_safe()
+
     def disconnect(self):
         """Disconnect MQTT client and cancel all background timers.
         Should be called when the integration is being unloaded to prevent

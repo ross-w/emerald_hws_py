@@ -385,6 +385,18 @@ def mark_connected(client, mocker):
     mocker.patch.object(client._connection_event, "is_set", return_value=True)
 
 
+def connect_and_clear_publishes(client):
+    """Run connect(), then forget the comp_query burst it sends on startup.
+
+    connect() publishes a comp_query per heat pump so initial state comes from
+    the device rather than the REST snapshot, which lags behind. Tests that
+    assert on a later publish - a control message, an explicit status request -
+    care only about that one, so drop the startup calls from the mock.
+    """
+    client.connect()
+    client.mqttClient.publish.reset_mock()
+
+
 @pytest.fixture
 def mock_requests(mocker):
     """Mock requests library for API calls."""
