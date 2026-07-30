@@ -5,12 +5,14 @@ These tests focus on basic integration - that control operations can be called
 and result in MQTT publish being invoked.
 """
 
+import json
 import pytest
 from unittest.mock import Mock
 from emerald_hws import EmeraldHWS
 from .conftest import (
     MOCK_LOGIN_RESPONSE,
     MOCK_PROPERTY_RESPONSE_SELF,
+    connect_and_clear_publishes,
     mark_connected,
 )
 
@@ -48,7 +50,7 @@ def test_control_operations_trigger_mqtt_publish(
     # Create and connect client
     client = EmeraldHWS("test@example.com", "password")
     mark_connected(client, mocker)
-    client.connect()
+    connect_and_clear_publishes(client)
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
@@ -90,8 +92,23 @@ def test_control_operation_auto_connects_when_disconnected(
     # Verify connection was established
     assert client._setup_complete
 
-    # Verify MQTT publish was called
+    # Verify MQTT publish was called. The auto-connect runs first and sends its
+    # own comp_query to seed state, so the control message is the last publish
+    # rather than the only one - assert on both, so a control message that
+    # silently stopped being sent cannot pass on the comp_query alone.
     mqtt_client = (
         mock_mqtt5_client_builder.websockets_with_default_aws_signing.return_value
     )
-    mqtt_client.publish.assert_called_once()
+    commands = [
+        json.loads(call[0][0].payload)[0]["command"]
+        for call in mqtt_client.publish.call_args_list
+    ]
+    assert "comp_query" in commands[:-1], (
+        f"auto-connect should have seeded state with a comp_query, got {commands}"
+    )
+    assert commands[-1] == "control", (
+        f"the control message should be the final publish, got {commands}"
+    )
+    assert commands.count("control") == 1, (
+        f"turnOn should publish exactly one control message, got {commands}"
+    )

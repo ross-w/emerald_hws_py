@@ -12,6 +12,7 @@ from emerald_hws import EmeraldHWS
 from .conftest import (
     MOCK_LOGIN_RESPONSE,
     MOCK_PROPERTY_RESPONSE_SELF,
+    connect_and_clear_publishes,
     mark_connected,
 )
 
@@ -50,7 +51,7 @@ def test_control_operations_send_correct_payload(
     # Create and connect client
     client = EmeraldHWS("test@example.com", "password")
     mark_connected(client, mocker)
-    client.connect()
+    connect_and_clear_publishes(client)
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
 
@@ -114,7 +115,7 @@ def test_control_message_includes_property_details(
     # Create and connect client
     client = EmeraldHWS("test@example.com", "password")
     mark_connected(client, mocker)
-    client.connect()
+    connect_and_clear_publishes(client)
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     client.turnOn(hws_id)
@@ -150,7 +151,7 @@ def test_control_message_fails_for_nonexistent_device(
     # Create and connect client
     client = EmeraldHWS("test@example.com", "password")
     mark_connected(client, mocker)
-    client.connect()
+    connect_and_clear_publishes(client)
 
     # Attempt control on non-existent device
     with pytest.raises(Exception) as exc_info:
@@ -181,7 +182,7 @@ def test_control_message_topic_format(
     # Create and connect client
     client = EmeraldHWS("test@example.com", "password")
     mark_connected(client, mocker)
-    client.connect()
+    connect_and_clear_publishes(client)
 
     hws_id = "hws-1111-aaaa-2222-bbbb"
     client.setBoostMode(hws_id)

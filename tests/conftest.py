@@ -385,6 +385,41 @@ def mark_connected(client, mocker):
     mocker.patch.object(client._connection_event, "is_set", return_value=True)
 
 
+def connect_and_clear_publishes(client, expected_comp_queries=1):
+    """Run connect(), then forget the comp_query burst it sends on startup.
+
+    connect() publishes a comp_query per heat pump so initial state comes from
+    the device rather than the REST snapshot, which lags behind. Tests that
+    assert on a later publish - a control message, an explicit status request -
+    care only about that one, so drop the startup calls from the mock.
+
+    The burst is identified before it is dropped, so a connect() that grew an
+    unexpected extra publish fails here rather than being silently swallowed.
+    Identification only - the comp_query envelope itself is pinned in one
+    place, test_status_requested_via_mqtt_on_initial_connect. Repeating those
+    assertions here would make an envelope change break every test that merely
+    passes through this helper.
+
+    :param expected_comp_queries: how many heat pumps the mocked API returns;
+        defaults to 1, matching MOCK_PROPERTY_RESPONSE_SELF.
+    """
+    client.connect()
+
+    publish = client.mqttClient.publish
+    assert publish.call_count == expected_comp_queries, (
+        f"connect() should publish exactly {expected_comp_queries} comp_query "
+        f"message(s), got {publish.call_count}: {publish.call_args_list}"
+    )
+    for call in publish.call_args_list:
+        header, _ = json.loads(call[0][0].payload)
+        assert header["command"] == "comp_query", (
+            f"connect() published an unexpected '{header['command']}' message"
+        )
+        assert header["device_id"], "startup comp_query is missing its device_id"
+
+    publish.reset_mock()
+
+
 @pytest.fixture
 def mock_requests(mocker):
     """Mock requests library for API calls."""

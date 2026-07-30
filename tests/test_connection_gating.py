@@ -27,6 +27,7 @@ from emerald_hws import (
 from .conftest import (
     MOCK_LOGIN_RESPONSE,
     MOCK_PROPERTY_RESPONSE_SELF,
+    connect_and_clear_publishes,
     mark_connected,
 )
 
@@ -45,7 +46,9 @@ def _connected_client(mock_requests, mocker):
 
     client = EmeraldHWS("test@example.com", "password")
     mark_connected(client, mocker)
-    client.connect()
+    # Clears the startup comp_query so these gate assertions see only the
+    # publish the test itself triggers.
+    connect_and_clear_publishes(client)
     return client
 
 
