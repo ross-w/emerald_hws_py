@@ -12,7 +12,29 @@ import requests
 from awscrt import mqtt5, auth, io
 from awsiot import mqtt5_client_builder
 
-from .exceptions import EmeraldConnectionError, EmeraldError, EmeraldTimeoutError
+# Bound by name so that patching the `requests` module (as the tests do) cannot
+# turn these into Mocks, which are uncatchable.
+from requests.exceptions import RequestException
+from requests.exceptions import Timeout as RequestsTimeout
+
+from .exceptions import (
+    EmeraldApiError,
+    EmeraldAuthError,
+    EmeraldConnectionError,
+    EmeraldError,
+    EmeraldTimeoutError,
+)
+
+# Seconds. Generous, and just under the 30s the HA integration allows sign-in,
+# so our typed error wins that race rather than the caller's own timeout.
+DEFAULT_REQUEST_TIMEOUT = 25.0
+
+# Credential rejection. The response status is the stronger signal; the body's
+# "code" mirrors HTTP semantics but is weaker, so EmeraldAuthError records which
+# one fired. Every other non-200 code stays retryable - Emerald has returned auth
+# failures during its own outages.
+_AUTH_STATUSES = frozenset({401, 403})
+_AUTH_BODY_CODES = frozenset({401, 403})
 
 
 @contextmanager
@@ -53,6 +75,7 @@ class EmeraldHWS:
         update_callback=None,
         connection_timeout_minutes=720,
         health_check_minutes=60,
+        request_timeout_seconds=DEFAULT_REQUEST_TIMEOUT,
     ):
         """Initialise the API client
         :param email: The email address for logging into the Emerald app
@@ -60,6 +83,8 @@ class EmeraldHWS:
         :param update_callback: Optional callback function to be called when an update is available
         :param connection_timeout_minutes: Optional timeout in minutes before reconnecting MQTT (default: 720 minutes/12 hours)
         :param health_check_minutes: Optional interval in minutes to check for message activity (default: 60 minutes/1 hour)
+        :param request_timeout_seconds: Optional per-request timeout in seconds for
+            HTTP calls to the Emerald API (default: 25 seconds). Seconds, not minutes.
         """
 
         self.email = email
@@ -96,6 +121,7 @@ class EmeraldHWS:
         self.health_check_interval = (
             health_check_minutes * 60.0 if health_check_minutes > 0 else 0
         )
+        self.request_timeout = request_timeout_seconds
         self.last_message_time = None
         self.health_check_timer = None
         self.reconnect_timer = None
@@ -119,8 +145,97 @@ class EmeraldHWS:
             )
             self.health_check_interval = 5 * 60.0
 
+    def _api_request(
+        self, method, url, headers, error_message, payload=None, allow_auth_error=False
+    ):
+        """Call the Emerald API and return its parsed body plus HTTP status.
+
+        All HTTP error classification lives here so both endpoints agree on what
+        counts as a credential rejection and what counts as retryable.
+
+        :param allow_auth_error: whether this endpoint may raise EmeraldAuthError.
+            Only sign-in passes True - a refused token elsewhere is not proof the
+            password is wrong.
+        :returns: (body, status_code), where body is a dict whose "code" is 200
+        :raises EmeraldTimeoutError: the request did not complete in time
+        :raises EmeraldConnectionError: no response arrived
+        :raises EmeraldAuthError: sign-in was rejected on the credentials
+        :raises EmeraldApiError: any other unusable response
+        """
+        request = requests.post if method == "post" else requests.get
+        kwargs = {"headers": headers, "timeout": self.request_timeout}
+        if payload is not None:
+            kwargs["json"] = payload
+
+        # Every wrap below chains the original: callers walk __cause__ to
+        # recognise the underlying transport failure.
+        try:
+            response = request(url, **kwargs)
+        except RequestsTimeout as e:
+            raise EmeraldTimeoutError(
+                f"Timed out calling {url} after {self.request_timeout}s"
+            ) from e
+        except RequestException as e:
+            raise EmeraldConnectionError(f"Unable to reach {url}: {e}") from e
+
+        status = getattr(response, "status_code", None)
+
+        try:
+            body = response.json()
+        except ValueError as e:
+            # An HTML error page or captive portal - raised in the handler so
+            # __cause__ keeps the decode error.
+            self.logger.warning(
+                f"emeraldhws: Unparseable body from {url} (HTTP {status})"
+            )
+            raise EmeraldApiError(error_message, status_code=status) from e
+
+        if not isinstance(body, dict):
+            self.logger.warning(
+                f"emeraldhws: Non-object body from {url} (HTTP {status})"
+            )
+            raise EmeraldApiError(error_message, status_code=status)
+
+        code = body.get("code")
+        if code == 200:
+            # The body is authoritative for success, so a good payload behind an
+            # odd status still works.
+            return body, status
+
+        api_message = body.get("message")
+        self.logger.warning(
+            f"emeraldhws: {url} refused: HTTP {status}, api code {code}, "
+            f"message {api_message!r}"
+        )
+
+        if allow_auth_error:
+            evidence = None
+            if status in _AUTH_STATUSES:
+                evidence = "http_status"
+            elif code in _AUTH_BODY_CODES:
+                evidence = "body_code"
+            if evidence:
+                raise EmeraldAuthError(
+                    error_message,
+                    status_code=status,
+                    api_code=code,
+                    api_message=api_message,
+                    auth_evidence=evidence,
+                )
+
+        raise EmeraldApiError(
+            error_message, status_code=status, api_code=code, api_message=api_message
+        )
+
     def getLoginToken(self):
-        """Performs an API request to get a token from the API"""
+        """Performs an API request to get a token from the API
+
+        :returns: True on success
+        :raises EmeraldAuthError: the credentials were rejected at sign-in
+        :raises EmeraldApiError: the API answered with something unusable
+        :raises EmeraldConnectionError: the API could not be reached
+        :raises EmeraldTimeoutError: the request did not complete in time
+        """
         url = "https://api.emerald-ems.com.au/api/v1/customer/sign-in"
 
         payload = {
@@ -132,59 +247,78 @@ class EmeraldHWS:
             "password": self.password,
         }
 
-        headers = self.COMMON_HEADERS
+        headers = dict(self.COMMON_HEADERS)
+        error_message = "Failed to log into Emerald API with supplied credentials"
 
-        post_response = requests.post(url, json=payload, headers=headers)
+        body, status = self._api_request(
+            "post", url, headers, error_message, payload=payload, allow_auth_error=True
+        )
 
-        post_response_json = post_response.json()
-        if post_response_json.get("code") == 200:
-            self.token = post_response_json.get("token")
-            return True
-        else:
-            raise Exception("Failed to log into Emerald API with supplied credentials")
+        token = body.get("token")
+        if not token:
+            # A 200 with no token is a broken response, not a rejected password.
+            raise EmeraldApiError(
+                error_message,
+                status_code=status,
+                api_code=body.get("code"),
+                api_message=body.get("message"),
+            )
+
+        self.token = token
+        return True
 
     def getAllHWS(self):
-        """Interrogates the API to list out all hot water systems on the account"""
+        """Interrogates the API to list out all hot water systems on the account
+
+        :raises EmeraldApiError: the API answered with something unusable. A 401
+            here means the token was refused, which is not proof the credentials
+            are wrong, so this never raises EmeraldAuthError.
+        :raises EmeraldConnectionError: the API could not be reached
+        :raises EmeraldTimeoutError: the request did not complete in time
+        """
 
         if not self.token:
             self.getLoginToken()
 
         url = "https://api.emerald-ems.com.au/api/v1/customer/property/list"
-        headers = self.COMMON_HEADERS
+        # Copy: mutating COMMON_HEADERS would write the authorization header onto
+        # the class-level dict shared by every instance.
+        headers = dict(self.COMMON_HEADERS)
         headers["authorization"] = "Bearer {}".format(self.token)
 
-        post_response = requests.get(url, headers=headers)
-        post_response_json = post_response.json()
+        body, status = self._api_request(
+            "get", url, headers, "Unable to fetch properties from Emerald API"
+        )
 
-        if post_response_json.get("code") == 200:
-            self.logger.debug("emeraldhws: Successfully logged into Emerald API")
-            info = post_response_json.get("info", {})
+        self.logger.debug("emeraldhws: Successfully logged into Emerald API")
+        info = body.get("info", {})
 
-            # Retrieve both property and shared_property arrays
-            property_data = info.get("property", [])
-            shared_property_data = info.get("shared_property", [])
+        # Retrieve both property and shared_property arrays
+        property_data = info.get("property", [])
+        shared_property_data = info.get("shared_property", [])
 
-            # Combine both arrays into a single list
-            combined_properties = []
-            if isinstance(property_data, list):
-                combined_properties.extend(property_data)
-            if isinstance(shared_property_data, list):
-                combined_properties.extend(shared_property_data)
+        # Combine both arrays into a single list
+        combined_properties = []
+        if isinstance(property_data, list):
+            combined_properties.extend(property_data)
+        if isinstance(shared_property_data, list):
+            combined_properties.extend(shared_property_data)
 
-            with self._state_lock:
-                self.properties = combined_properties
+        with self._state_lock:
+            self.properties = combined_properties
 
-            # Check if we got valid data
-            if len(combined_properties) == 0:
-                # Log the full response when properties are invalid to help diagnose the issue
-                self.logger.debug(
-                    f"emeraldhws: Poperties empty/invalid, full response: {post_response_json}"
-                )
-                raise Exception(
-                    "No heat pumps found on account - API returned empty or invalid property list"
-                )
-        else:
-            raise Exception("Unable to fetch properties from Emerald API")
+        # Check if we got valid data
+        if len(combined_properties) == 0:
+            # Log the full response when properties are invalid to help diagnose the issue
+            self.logger.debug(
+                f"emeraldhws: Poperties empty/invalid, full response: {body}"
+            )
+            raise EmeraldApiError(
+                "No heat pumps found on account - API returned empty or invalid property list",
+                status_code=status,
+                api_code=body.get("code"),
+                api_message=body.get("message"),
+            )
 
     def _wait_for_properties(self, timeout=30):
         """
@@ -193,7 +327,7 @@ class EmeraldHWS:
 
         :param timeout: Maximum seconds to wait
         :returns: List of properties
-        :raises: Exception if timeout or properties not available
+        :raises EmeraldTimeoutError: if properties did not arrive in time
         """
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -205,7 +339,7 @@ class EmeraldHWS:
         # Timeout - provide detailed error message
         with self._state_lock:
             final_value = self.properties
-        raise Exception(
+        raise EmeraldTimeoutError(
             f"Timeout waiting for properties to be populated. Current value: {type(final_value).__name__} = {final_value}"
         )
 

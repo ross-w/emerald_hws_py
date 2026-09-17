@@ -497,3 +497,18 @@ def mqtt_client_with_properties():
         "hws_id": "hws-1111-aaaa-2222-bbbb",
         "topic": "ep/heat_pump/from_gw/hws-1111-aaaa-2222-bbbb",
     }
+
+
+def make_response(body=None, status_code=200, text=None):
+    """Build a mock requests.Response.
+
+    `body=None` means .json() raises, the way an HTML error page does.
+    """
+    resp = Mock()
+    resp.status_code = status_code
+    resp.text = text if text is not None else json.dumps(body)
+    if body is None:
+        resp.json.side_effect = ValueError("Expecting value: line 1 column 1 (char 0)")
+    else:
+        resp.json.return_value = body
+    return resp

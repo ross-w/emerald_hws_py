@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import Mock
-from emerald_hws import EmeraldHWS
+from emerald_hws import EmeraldApiError, EmeraldAuthError, EmeraldHWS
 from .conftest import (
     MOCK_LOGIN_RESPONSE,
     MOCK_PROPERTY_RESPONSE_SELF,
@@ -106,10 +106,12 @@ def test_empty_properties_raises_exception(mock_requests):
     # Execute and verify exception
     client = EmeraldHWS("test@example.com", "password")
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(EmeraldApiError) as exc_info:
         client.getAllHWS()
 
     assert "No heat pumps found" in str(exc_info.value)
+    # The account answered fine, it just has nothing on it - not a credentials problem.
+    assert not isinstance(exc_info.value, EmeraldAuthError)
 
 
 def test_auto_login_if_no_token(mock_requests):

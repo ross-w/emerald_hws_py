@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import Mock
-from emerald_hws import EmeraldHWS
+from emerald_hws import EmeraldApiError, EmeraldAuthError, EmeraldError, EmeraldHWS
 from .conftest import MOCK_LOGIN_RESPONSE, MOCK_LOGIN_FAILURE_RESPONSE
 
 
@@ -38,9 +38,12 @@ def test_failed_login(mock_requests):
     # Create client and attempt login
     client = EmeraldHWS("test@example.com", "wrongpassword")
 
-    # Should raise exception on failed login
-    with pytest.raises(Exception) as exc_info:
+    # Should raise a typed auth error on failed login
+    with pytest.raises(EmeraldAuthError) as exc_info:
         client.getLoginToken()
 
     assert "Failed to log into Emerald API" in str(exc_info.value)
+    assert isinstance(exc_info.value, EmeraldApiError)
+    assert isinstance(exc_info.value, EmeraldError)
+    assert exc_info.value.api_code == 401
     assert client.token == ""
